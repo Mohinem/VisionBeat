@@ -146,8 +146,12 @@ def test_gesture_config_rejects_invalid_values(payload: dict[str, object], messa
 
 def test_audio_config_serializes_round_trip() -> None:
     config = AudioConfig(
+        backend="pygame",
         sample_rate=48_000,
         buffer_size=512,
+        output_channels=2,
+        simultaneous_voices=24,
+        output_device_name="Interface 1",
         kick_sample="kick.wav",
         snare_sample="snare.wav",
         volume=0.4,
@@ -158,7 +162,11 @@ def test_audio_config_serializes_round_trip() -> None:
 
 @pytest.mark.parametrize(
     ("payload", "message"),
-    [({"volume": 1.1}, "volume"), ({"kick_sample": " "}, "kick_sample")],
+    [
+        ({"volume": 1.1}, "volume"),
+        ({"kick_sample": " "}, "kick_sample"),
+        ({"backend": "sounddevice"}, "backend"),
+    ],
 )
 def test_audio_config_rejects_invalid_values(payload: dict[str, object], message: str) -> None:
     with pytest.raises(ValueError, match=message):

@@ -9,7 +9,7 @@ VisionBeat is organized as a real-time pipeline with explicit boundaries between
 1. **CameraStream** opens an OpenCV webcam source and yields mirrored BGR frames.
 2. **PoseTracker** runs MediaPipe Pose on each frame and converts selected landmarks into a normalized `PoseFrame`.
 3. **GestureDetector** consumes `PoseFrame` objects and emits `GestureEvent` values for kick and snare gestures.
-4. **AudioEngine** maps gestures to samples and triggers playback with `pygame.mixer`.
+4. **AudioEngine** is an abstraction that maps gestures to named samples; the current `PygameAudioEngine` backend triggers playback through `pygame.mixer`.
 5. **OverlayRenderer** draws landmarks, labels, and debug state onto the preview frame.
 6. **VisionBeatApp** orchestrates the loop, logging, cleanup, and keyboard exit handling.
 

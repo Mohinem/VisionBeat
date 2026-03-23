@@ -77,7 +77,7 @@ VisionBeat loads settings from a TOML file. The included sample config lives at 
 - camera device, resolution, and mirroring
 - MediaPipe confidence thresholds
 - gesture thresholds and cooldown windows
-- sample file paths and audio buffer size
+- sample file paths, backend selection, and output settings
 - overlay visibility and debug options
 
 Example:
@@ -127,6 +127,7 @@ pytest
 ## Documentation
 
 - Architecture overview: [`docs/architecture.md`](docs/architecture.md)
+- Audio subsystem guide: [`docs/audio.md`](docs/audio.md)
 - Default configuration: [`configs/default.toml`](configs/default.toml)
 - Sample generation utility: [`scripts/generate_demo_samples.py`](scripts/generate_demo_samples.py)
 - Sample asset policy: [`assets/samples/README.md`](assets/samples/README.md)

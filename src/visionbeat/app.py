@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from visionbeat.audio import AudioEngine
+from visionbeat.audio import AudioEngine, create_audio_engine
 from visionbeat.camera import CameraSource
 from visionbeat.config import AppConfig
 from visionbeat.gestures import GestureDetector
@@ -32,7 +32,7 @@ class VisionBeatApp:
         self.camera = CameraSource(self.config.camera)
         self.tracker = PoseTracker(self.config.tracker)
         self.detector = GestureDetector(self.config.gestures)
-        self.audio = AudioEngine(self.config.audio)
+        self.audio = create_audio_engine(self.config.audio)
         self.overlay = OverlayRenderer(self.config.overlay)
 
     def run(self) -> None:
