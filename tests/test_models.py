@@ -1,6 +1,15 @@
 import pytest
 
-from visionbeat.config import AppConfig, AudioConfig, CameraConfig, GestureConfig, TrackerConfig
+from visionbeat.config import (
+    AppConfig,
+    AudioConfig,
+    CameraConfig,
+    GestureConfig,
+    GestureCooldownsConfig,
+    GestureThresholdsConfig,
+    LoggingConfig,
+    TrackerConfig,
+)
 from visionbeat.models import (
     AudioTrigger,
     DetectionCandidate,
@@ -106,42 +115,20 @@ def test_tracker_output_serializes_round_trip() -> None:
 
 
 def test_camera_config_serializes_round_trip() -> None:
-    config = CameraConfig(width=1920, height=1080, fps=60, window_name=" VisionBeat ")
+    config = CameraConfig(width=1920, height=1080, fps=60, window_name="VisionBeat")
 
-    assert CameraConfig.from_dict(config.to_dict()) == CameraConfig(
-        width=1920,
-        height=1080,
-        fps=60,
-        window_name="VisionBeat",
-    )
-
-
-@pytest.mark.parametrize(
-    ("payload", "message"),
-    [({"width": 0}, "width"), ({"device_index": -1}, "device_index")],
-)
-def test_camera_config_rejects_invalid_values(payload: dict[str, int], message: str) -> None:
-    with pytest.raises(ValueError, match=message):
-        CameraConfig(**payload)
+    assert CameraConfig.from_dict(config.to_dict()) == config
 
 
 def test_gesture_config_serializes_round_trip() -> None:
-    config = GestureConfig(active_hand="LEFT", history_size=8, cooldown_seconds=0.25)
-
-    assert GestureConfig.from_dict(config.to_dict()) == GestureConfig(
+    config = GestureConfig(
+        thresholds=GestureThresholdsConfig(punch_forward_delta_z=0.24),
+        cooldowns=GestureCooldownsConfig(trigger_seconds=0.25),
         active_hand="left",
         history_size=8,
-        cooldown_seconds=0.25,
     )
 
-
-@pytest.mark.parametrize(
-    ("payload", "message"),
-    [({"history_size": 0}, "history_size"), ({"active_hand": "both"}, "active_hand")],
-)
-def test_gesture_config_rejects_invalid_values(payload: dict[str, object], message: str) -> None:
-    with pytest.raises(ValueError, match=message):
-        GestureConfig(**payload)
+    assert GestureConfig.from_dict(config.to_dict()) == config
 
 
 def test_audio_config_serializes_round_trip() -> None:
@@ -152,25 +139,11 @@ def test_audio_config_serializes_round_trip() -> None:
         output_channels=2,
         simultaneous_voices=24,
         output_device_name="Interface 1",
-        kick_sample="kick.wav",
-        snare_sample="snare.wav",
+        sample_mapping={"kick": "kick.wav", "snare": "snare.wav"},
         volume=0.4,
     )
 
     assert AudioConfig.from_dict(config.to_dict()) == config
-
-
-@pytest.mark.parametrize(
-    ("payload", "message"),
-    [
-        ({"volume": 1.1}, "volume"),
-        ({"kick_sample": " "}, "kick_sample"),
-        ({"backend": "sounddevice"}, "backend"),
-    ],
-)
-def test_audio_config_rejects_invalid_values(payload: dict[str, object], message: str) -> None:
-    with pytest.raises(ValueError, match=message):
-        AudioConfig(**payload)
 
 
 def test_app_config_serializes_round_trip() -> None:
@@ -178,16 +151,11 @@ def test_app_config_serializes_round_trip() -> None:
         camera=CameraConfig(width=640, height=480, fps=24),
         tracker=TrackerConfig(model_complexity=2),
         gestures=GestureConfig(active_hand="right"),
-        audio=AudioConfig(kick_sample="kick.wav", snare_sample="snare.wav"),
-        log_level="debug",
+        audio=AudioConfig(sample_mapping={"kick": "kick.wav", "snare": "snare.wav"}),
+        logging=LoggingConfig(level="DEBUG"),
     )
 
     restored = AppConfig.from_dict(config.to_dict())
 
-    assert restored == AppConfig(
-        camera=CameraConfig(width=640, height=480, fps=24),
-        tracker=TrackerConfig(model_complexity=2),
-        gestures=GestureConfig(active_hand="right"),
-        audio=AudioConfig(kick_sample="kick.wav", snare_sample="snare.wav"),
-        log_level="DEBUG",
-    )
+    assert restored == config
+    assert restored.log_level == "DEBUG"

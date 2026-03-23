@@ -59,7 +59,7 @@ def test_create_audio_engine_uses_pygame_backend(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr(PygameAudioEngine, "_import_pygame", lambda self: fake_pygame)
 
     engine = create_audio_engine(
-        AudioConfig(kick_sample=kick.as_posix(), snare_sample=snare.as_posix())
+        AudioConfig(sample_mapping={"kick": kick.as_posix(), "snare": snare.as_posix()})
     )
 
     assert isinstance(engine, PygameAudioEngine)
@@ -74,8 +74,6 @@ def test_load_config_preserves_audio_output_settings(tmp_path: Path) -> None:
     config_path = tmp_path / "audio-config.toml"
     config_path.write_text(
         """
-log_level = "INFO"
-
 [audio]
 backend = "pygame"
 sample_rate = 48000
@@ -83,9 +81,14 @@ buffer_size = 512
 output_channels = 2
 simultaneous_voices = 24
 output_device_name = "USB Interface"
-kick_sample = "assets/samples/kick.wav"
-snare_sample = "assets/samples/snare.wav"
 volume = 0.75
+
+[audio.sample_mapping]
+kick = "assets/samples/kick.wav"
+snare = "assets/samples/snare.wav"
+
+[logging]
+level = "INFO"
 """.strip()
     )
 
@@ -98,7 +101,9 @@ volume = 0.75
         output_channels=2,
         simultaneous_voices=24,
         output_device_name="USB Interface",
-        kick_sample="assets/samples/kick.wav",
-        snare_sample="assets/samples/snare.wav",
+        sample_mapping={
+            "kick": "assets/samples/kick.wav",
+            "snare": "assets/samples/snare.wav",
+        },
         volume=0.75,
     )

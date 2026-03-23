@@ -13,7 +13,7 @@ The codebase is intentionally modular so that the gesture recognition layer can 
 - MediaPipe pose-based wrist and upper-body tracking
 - Gesture detection isolated in a pure Python module
 - Low-latency kick/snare sample playback with pygame
-- Structured configuration using dataclasses and TOML files
+- Structured configuration using validated YAML or TOML files
 - Logging with Python's built-in `logging`
 - Unit tests with pytest
 - CI for linting, type checking, and tests
@@ -65,14 +65,14 @@ python scripts/generate_demo_samples.py
 ### 4. Run VisionBeat
 
 ```bash
-visionbeat --config configs/default.toml
+visionbeat --config configs/default.yaml
 ```
 
 Press `q` or `Esc` to exit.
 
 ## Configuration
 
-VisionBeat loads settings from a TOML file. The included sample config lives at `configs/default.toml` and controls:
+VisionBeat loads settings from a YAML or TOML file. The default sample config lives at `configs/default.yaml` and controls:
 
 - camera device, resolution, and mirroring
 - MediaPipe confidence thresholds
@@ -82,12 +82,14 @@ VisionBeat loads settings from a TOML file. The included sample config lives at 
 
 Example:
 
-```toml
-[gestures]
-punch_forward_delta_z = 0.18
-strike_down_delta_y = 0.22
-cooldown_seconds = 0.18
-active_hand = "right"
+```yaml
+gestures:
+  thresholds:
+    punch_forward_delta_z: 0.2
+    strike_down_delta_y: 0.26
+  cooldowns:
+    trigger_seconds: 0.2
+  active_hand: right
 ```
 
 ## Gesture architecture
@@ -128,7 +130,8 @@ pytest
 
 - Architecture overview: [`docs/architecture.md`](docs/architecture.md)
 - Audio subsystem guide: [`docs/audio.md`](docs/audio.md)
-- Default configuration: [`configs/default.toml`](configs/default.toml)
+- Default configuration: [`configs/default.yaml`](configs/default.yaml)
+- Configuration reference: [`docs/configuration.md`](docs/configuration.md)
 - Sample generation utility: [`scripts/generate_demo_samples.py`](scripts/generate_demo_samples.py)
 - Sample asset policy: [`assets/samples/README.md`](assets/samples/README.md)
 

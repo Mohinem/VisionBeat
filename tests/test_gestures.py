@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from typing import Any
 
-from visionbeat.config import GestureConfig
+from visionbeat.config import GestureConfig, GestureCooldownsConfig, GestureThresholdsConfig
 from visionbeat.gestures import GestureDetector
 from visionbeat.models import FrameTimestamp, GestureType, LandmarkPoint, TrackerOutput
 
@@ -33,7 +33,12 @@ def collect_events(
 
 
 def test_no_trigger_when_stationary() -> None:
-    detector = GestureDetector(GestureConfig(history_size=6, analysis_window_seconds=0.2))
+    detector = GestureDetector(
+        GestureConfig(
+            history_size=6,
+            cooldowns=GestureCooldownsConfig(analysis_window_seconds=0.2),
+        )
+    )
 
     events = collect_events(
         detector,
@@ -53,9 +58,15 @@ def test_punch_trigger_under_valid_motion() -> None:
     detector = GestureDetector(
         GestureConfig(
             history_size=6,
-            analysis_window_seconds=0.2,
-            confirmation_window_seconds=0.15,
-            cooldown_seconds=0.05,
+            cooldowns=GestureCooldownsConfig(
+                analysis_window_seconds=0.2,
+                confirmation_window_seconds=0.15,
+                trigger_seconds=0.05,
+            ),
+            thresholds=GestureThresholdsConfig(
+                strike_down_delta_y=0.15,
+                min_velocity=0.5,
+            ),
         )
     )
 
@@ -79,9 +90,15 @@ def test_downward_strike_trigger_under_valid_motion() -> None:
     detector = GestureDetector(
         GestureConfig(
             history_size=6,
-            analysis_window_seconds=0.2,
-            confirmation_window_seconds=0.15,
-            cooldown_seconds=0.05,
+            cooldowns=GestureCooldownsConfig(
+                analysis_window_seconds=0.2,
+                confirmation_window_seconds=0.15,
+                trigger_seconds=0.05,
+            ),
+            thresholds=GestureThresholdsConfig(
+                strike_down_delta_y=0.15,
+                min_velocity=0.5,
+            ),
         )
     )
 
@@ -103,9 +120,11 @@ def test_cooldown_suppresses_duplicates() -> None:
     detector = GestureDetector(
         GestureConfig(
             history_size=6,
-            cooldown_seconds=0.30,
-            analysis_window_seconds=0.25,
-            confirmation_window_seconds=0.15,
+            cooldowns=GestureCooldownsConfig(
+                trigger_seconds=0.30,
+                analysis_window_seconds=0.25,
+                confirmation_window_seconds=0.15,
+            ),
         )
     )
 
@@ -130,9 +149,11 @@ def test_noisy_motion_does_not_trigger_falsely() -> None:
     detector = GestureDetector(
         GestureConfig(
             history_size=8,
-            analysis_window_seconds=0.2,
-            confirmation_window_seconds=0.12,
-            axis_dominance_ratio=1.7,
+            cooldowns=GestureCooldownsConfig(
+                analysis_window_seconds=0.2,
+                confirmation_window_seconds=0.12,
+            ),
+            thresholds=GestureThresholdsConfig(axis_dominance_ratio=1.7),
         )
     )
 
@@ -156,11 +177,15 @@ def test_edge_cases_near_thresholds() -> None:
     detector = GestureDetector(
         GestureConfig(
             history_size=6,
-            analysis_window_seconds=0.2,
-            confirmation_window_seconds=0.15,
-            punch_forward_delta_z=0.18,
-            strike_down_delta_y=0.22,
-            min_velocity=0.5,
+            cooldowns=GestureCooldownsConfig(
+                analysis_window_seconds=0.2,
+                confirmation_window_seconds=0.15,
+            ),
+            thresholds=GestureThresholdsConfig(
+                punch_forward_delta_z=0.18,
+                strike_down_delta_y=0.22,
+                min_velocity=0.5,
+            ),
         )
     )
 

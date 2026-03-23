@@ -20,7 +20,7 @@ VisionBeat is organized as a real-time pipeline with explicit boundaries between
 - `visionbeat.gestures`: pure trajectory analysis and cooldown handling.
 - `visionbeat.audio`: sample loading and playback.
 - `visionbeat.overlay`: OpenCV-based diagnostics and labels.
-- `visionbeat.config`: dataclass configuration models and TOML loading.
+- `visionbeat.config`: strongly validated configuration models and YAML/TOML loading.
 - `visionbeat.logging_config`: centralized logging setup.
 - `visionbeat.models`: shared dataclasses and enums.
 
@@ -40,7 +40,7 @@ The `GestureDetector` accepts plain dataclass models rather than MediaPipe proto
 
 ## Configuration and operations
 
-- Runtime settings are loaded from `configs/default.toml` via `load_config`.
+- Runtime settings are loaded from `configs/default.yaml` via `load_config`.
 - Logging is configured once at startup and uses Python's standard library logging.
 - Placeholder samples are generated locally with `python scripts/generate_demo_samples.py` and are not committed as binary assets.
 
