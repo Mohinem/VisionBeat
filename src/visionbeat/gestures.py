@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from visionbeat.config import GestureConfig
 from visionbeat.math_utils import l1_velocity
-from visionbeat.models import GestureEvent, GestureType, TrackerOutput
+from visionbeat.models import FrameTimestamp, GestureEvent, GestureType, TrackerOutput
 
 
 @dataclass(slots=True)
@@ -84,7 +84,7 @@ class GestureDetector:
                 gesture=GestureType.KICK,
                 confidence=min(1.0, abs(delta_z) / (self.config.punch_forward_delta_z * 1.5)),
                 hand=hand,
-                timestamp=newest.timestamp,
+                timestamp=FrameTimestamp(seconds=newest.timestamp),
                 label="Forward punch → kick",
             )
 
@@ -98,7 +98,7 @@ class GestureDetector:
                 gesture=GestureType.SNARE,
                 confidence=min(1.0, delta_y / (self.config.strike_down_delta_y * 1.5)),
                 hand=hand,
-                timestamp=newest.timestamp,
+                timestamp=FrameTimestamp(seconds=newest.timestamp),
                 label="Downward strike → snare",
             )
 
