@@ -57,7 +57,12 @@ class PoseTracker:
                     z=landmark.z,
                     visibility=landmark.visibility,
                 )
-        return TrackerOutput(timestamp=timestamp, landmarks=landmarks)
+        frame_timestamp = (
+            timestamp
+            if isinstance(timestamp, FrameTimestamp)
+            else FrameTimestamp(seconds=timestamp)
+        )
+        return TrackerOutput(timestamp=frame_timestamp, landmarks=landmarks)
 
     def close(self) -> None:
         """Close MediaPipe resources."""

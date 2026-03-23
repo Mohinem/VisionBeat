@@ -146,12 +146,8 @@ class GestureEvent:
         hand = self.hand.strip().lower()
         if hand not in {"left", "right"}:
             raise ValueError("hand must be either 'left' or 'right'.")
-        timestamp = self.timestamp
-        if not isinstance(timestamp, FrameTimestamp):
-            timestamp = FrameTimestamp(seconds=timestamp)  # type: ignore[arg-type]
         object.__setattr__(self, "confidence", confidence)
         object.__setattr__(self, "hand", hand)
-        object.__setattr__(self, "timestamp", timestamp)
         object.__setattr__(self, "label", self.label.strip())
 
     def to_dict(self) -> dict[str, Any]:
@@ -189,11 +185,7 @@ class AudioTrigger:
         intensity = _coerce_float(self.intensity, field_name="intensity")
         if not 0.0 <= intensity <= 1.0:
             raise ValueError("intensity must be between 0.0 and 1.0.")
-        timestamp = self.timestamp
-        if not isinstance(timestamp, FrameTimestamp):
-            timestamp = FrameTimestamp(seconds=timestamp)  # type: ignore[arg-type]
         object.__setattr__(self, "intensity", intensity)
-        object.__setattr__(self, "timestamp", timestamp)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the trigger into a JSON-friendly dictionary."""
@@ -223,9 +215,6 @@ class TrackerOutput:
 
     def __post_init__(self) -> None:
         """Normalize mapping values and ensure deterministic immutable candidates."""
-        timestamp = self.timestamp
-        if not isinstance(timestamp, FrameTimestamp):
-            timestamp = FrameTimestamp(seconds=timestamp)  # type: ignore[arg-type]
         normalized_landmarks = {
             name: value if isinstance(value, LandmarkPoint) else LandmarkPoint.from_dict(value)
             for name, value in self.landmarks.items()
@@ -236,7 +225,6 @@ class TrackerOutput:
             else DetectionCandidate.from_dict(candidate)
             for candidate in self.candidates
         )
-        object.__setattr__(self, "timestamp", timestamp)
         object.__setattr__(self, "landmarks", normalized_landmarks)
         object.__setattr__(self, "candidates", normalized_candidates)
 
