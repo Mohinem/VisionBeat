@@ -1,12 +1,12 @@
 from visionbeat.config import GestureConfig
 from visionbeat.gestures import GestureDetector
-from visionbeat.models import GestureType, LandmarkPoint, PoseFrame
+from visionbeat.models import FrameTimestamp, GestureType, LandmarkPoint, TrackerOutput
 
 
-def make_frame(timestamp: float, *, right_wrist: tuple[float, float, float]) -> PoseFrame:
+def make_frame(timestamp: float, *, right_wrist: tuple[float, float, float]) -> TrackerOutput:
     x, y, z = right_wrist
-    return PoseFrame(
-        timestamp=timestamp,
+    return TrackerOutput(
+        timestamp=FrameTimestamp(seconds=timestamp),
         landmarks={"right_wrist": LandmarkPoint(x=x, y=y, z=z, visibility=1.0)},
     )
 
@@ -64,8 +64,8 @@ def test_cooldown_prevents_duplicate_triggers() -> None:
 
 def test_inactive_hand_is_ignored() -> None:
     detector = GestureDetector(GestureConfig(active_hand="left"))
-    frame = PoseFrame(
-        timestamp=0.1,
+    frame = TrackerOutput(
+        timestamp=FrameTimestamp(seconds=0.1),
         landmarks={"right_wrist": LandmarkPoint(x=0.5, y=0.5, z=-0.5, visibility=1.0)},
     )
 

@@ -10,6 +10,7 @@ from visionbeat.audio import AudioEngine
 from visionbeat.camera import CameraStream
 from visionbeat.config import AppConfig
 from visionbeat.gestures import GestureDetector
+from visionbeat.models import AudioTrigger, FrameTimestamp
 from visionbeat.overlay import OverlayRenderer
 from visionbeat.tracking import PoseTracker
 
@@ -43,12 +44,18 @@ class VisionBeatApp:
         try:
             while True:
                 frame = self.camera.read()
-                timestamp = time.monotonic()
+                timestamp = FrameTimestamp(seconds=time.monotonic())
                 pose = self.tracker.process(frame, timestamp)
                 events = self.detector.update(pose)
                 for event in events:
                     logger.info("Detected %s with confidence %.2f", event.gesture, event.confidence)
-                    self.audio.trigger(event.gesture)
+                    self.audio.trigger(
+                        AudioTrigger(
+                            gesture=event.gesture,
+                            timestamp=event.timestamp,
+                            intensity=event.confidence,
+                        )
+                    )
                 output = self.overlay.render(frame, pose, events)
                 cv2.imshow(self.config.camera.window_name, output)
                 if cv2.waitKey(1) & 0xFF in {27, ord('q')}:
