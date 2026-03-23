@@ -1,0 +1,53 @@
+camera:
+  device_index: 0
+  width: 1280
+  height: 720
+  fps: 30
+  mirror: true
+  window_name: VisionBeat
+
+tracker:
+  model_complexity: 1
+  min_detection_confidence: 0.55
+  min_tracking_confidence: 0.55
+  enable_segmentation: false
+
+gestures:
+  thresholds:
+    # Tuned for a crisp forward punch without over-triggering from arm drift.
+    punch_forward_delta_z: 0.2
+    punch_max_vertical_drift: 0.1
+    # Tuned for a decisive downward strike that still tolerates small depth wobble.
+    strike_down_delta_y: 0.26
+    strike_max_depth_drift: 0.1
+    min_velocity: 0.75
+    candidate_ratio: 0.7
+    axis_dominance_ratio: 1.7
+  cooldowns:
+    trigger_seconds: 0.2
+    analysis_window_seconds: 0.18
+    confirmation_window_seconds: 0.12
+  history_size: 6
+  active_hand: right
+
+audio:
+  backend: pygame
+  sample_rate: 44100
+  buffer_size: 256
+  output_channels: 2
+  simultaneous_voices: 16
+  output_device_name: null
+  sample_mapping:
+    kick: assets/samples/kick.wav
+    snare: assets/samples/snare.wav
+  volume: 0.9
+
+debug:
+  overlays:
+    draw_landmarks: true
+    draw_velocity_vectors: true
+    show_debug_panel: true
+
+logging:
+  level: INFO
+  format: '%(asctime)s | %(levelname)s | %(name)s | %(message)s'

@@ -58,8 +58,10 @@ def test_audio_engine_loads_available_assets_and_tracks_missing_samples(tmp_path
     create_sample(kick)
     fake_pygame = FakePygame()
     config = AudioConfig(
-        kick_sample=kick.as_posix(),
-        snare_sample=(tmp_path / "missing-snare.wav").as_posix(),
+        sample_mapping={
+            "kick": kick.as_posix(),
+            "snare": (tmp_path / "missing-snare.wav").as_posix(),
+        },
         output_device_name="Studio Output",
     )
 
@@ -86,8 +88,7 @@ def test_audio_engine_dispatches_named_and_structured_triggers(tmp_path: Path) -
     create_sample(snare)
     fake_pygame = FakePygame()
     config = AudioConfig(
-        kick_sample=kick.as_posix(),
-        snare_sample=snare.as_posix(),
+        sample_mapping={"kick": kick.as_posix(), "snare": snare.as_posix()},
         volume=0.8,
     )
     engine = PygameAudioEngine(config=config, pygame_module=fake_pygame)
@@ -120,7 +121,7 @@ def test_audio_engine_handles_repeated_triggers_without_crashing(tmp_path: Path)
     create_sample(snare)
     fake_pygame = FakePygame()
     engine = PygameAudioEngine(
-        config=AudioConfig(kick_sample=kick.as_posix(), snare_sample=snare.as_posix()),
+        config=AudioConfig(sample_mapping={"kick": kick.as_posix(), "snare": snare.as_posix()}),
         pygame_module=fake_pygame,
     )
 
@@ -136,8 +137,10 @@ def test_audio_engine_returns_false_for_missing_named_sound(tmp_path: Path) -> N
     fake_pygame = FakePygame()
     engine = PygameAudioEngine(
         config=AudioConfig(
-            kick_sample=(tmp_path / "missing-kick.wav").as_posix(),
-            snare_sample=(tmp_path / "missing-snare.wav").as_posix(),
+            sample_mapping={
+                "kick": (tmp_path / "missing-kick.wav").as_posix(),
+                "snare": (tmp_path / "missing-snare.wav").as_posix(),
+            },
         ),
         pygame_module=fake_pygame,
     )

@@ -25,8 +25,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        default="configs/default.toml",
-        help="Path to a TOML configuration file.",
+        default="configs/default.yaml",
+        help="Path to a YAML or TOML configuration file.",
     )
     parser.add_argument(
         "--camera-index",
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> None:
     """Initialize logging, load configuration, and start the application."""
     args = parse_args(argv)
     config = build_config(args.config, camera_index=args.camera_index)
-    configure_logging(config.log_level)
+    configure_logging(config.logging.level, log_format=config.logging.format)
     app = VisionBeatApp(config)
     app.run()
 
