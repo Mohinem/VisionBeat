@@ -17,6 +17,7 @@ from visionbeat.models import (
     GestureEvent,
     RenderState,
 )
+from visionbeat.observability import ObservabilityRecorder, build_observability_recorder
 from visionbeat.overlay import OverlayRenderer
 from visionbeat.tracking import PoseTracker
 
@@ -79,12 +80,15 @@ class VisionBeatRuntime:
     audio: AudioEngine
     overlay: OverlayRenderer
     preview: PreviewWindow
+    recorder: ObservabilityRecorder | None = None
     _last_confirmed_gesture: GestureEvent | None = field(default=None, init=False)
     _last_frame_time: float | None = field(default=None, init=False)
 
     def run(self) -> None:
         """Run the application until the preview window or frame source requests shutdown."""
         logger.info("Starting VisionBeat runtime loop")
+        if self.recorder is not None:
+            self.recorder.log_runtime_started(window_name=self.config.camera.window_name)
         self.camera.open()
         logger.info("Camera opened; entering processing loop")
         try:
@@ -110,6 +114,9 @@ class VisionBeatRuntime:
             len(events),
         )
 
+        if pose.status != "tracking" and self.recorder is not None:
+            self.recorder.log_tracking_failure(timestamp=timestamp.seconds, status=pose.status)
+
         for event in events:
             self._handle_confirmed_gesture(event)
 
@@ -126,6 +133,8 @@ class VisionBeatRuntime:
 
         if self.preview.should_close():
             logger.info("Stopping VisionBeat runtime loop on user request")
+            if self.recorder is not None:
+                self.recorder.log_runtime_stopped(reason="user_request")
             return False
         return True
 
@@ -168,10 +177,14 @@ class VisionBeatRuntime:
     def close(self) -> None:
         """Release external resources owned by the runtime."""
         logger.info("Shutting down VisionBeat runtime resources")
+        if self.recorder is not None:
+            self.recorder.log_app_shutdown()
         self.camera.close()
         self.tracker.close()
         self.audio.close()
         self.preview.close()
+        if self.recorder is not None:
+            self.recorder.close()
 
 
 @dataclass(slots=True)
@@ -182,6 +195,7 @@ class VisionBeatApp:
     camera: CameraSource = field(init=False)
     tracker: PoseTracker = field(init=False)
     detector: GestureDetector = field(init=False)
+    recorder: ObservabilityRecorder = field(init=False)
     audio: AudioEngine = field(init=False)
     overlay: OverlayRenderer = field(init=False)
     preview: PreviewWindow = field(init=False)
@@ -189,12 +203,23 @@ class VisionBeatApp:
 
     def __post_init__(self) -> None:
         """Initialize runtime dependencies."""
-        self.camera = CameraSource(self.config.camera)
+        self.recorder = build_observability_recorder(self.config.logging)
+        self.camera = CameraSource(self.config.camera, recorder=self.recorder)
         self.tracker = PoseTracker(self.config.tracker)
-        self.detector = GestureDetector(self.config.gestures)
+        self.detector = GestureDetector(self.config.gestures, observer=self.recorder)
         self.audio = create_audio_engine(self.config.audio)
         self.overlay = OverlayRenderer(self.config.overlay)
         self.preview = OpenCVPreviewWindow()
+        self.recorder.log_app_startup(
+            config_summary={
+                "camera_device_index": self.config.camera.device_index,
+                "camera_resolution": f"{self.config.camera.width}x{self.config.camera.height}",
+                "camera_fps": self.config.camera.fps,
+                "active_hand": self.config.gestures.active_hand,
+                "event_log_format": self.config.logging.event_log_format,
+                "event_log_path": self.config.logging.event_log_path,
+            }
+        )
         self.runtime = VisionBeatRuntime(
             config=self.config,
             camera=self.camera,
@@ -203,6 +228,7 @@ class VisionBeatApp:
             audio=self.audio,
             overlay=self.overlay,
             preview=self.preview,
+            recorder=self.recorder,
         )
 
     def run(self) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from visionbeat.config import GestureConfig
 from visionbeat.math_utils import l1_velocity
@@ -16,6 +17,20 @@ from visionbeat.models import (
     LandmarkPoint,
     TrackerOutput,
 )
+from visionbeat.observability import GestureObservationEvent, VelocityStats
+
+
+class GestureObserver(Protocol):
+    """Observer interface used to emit structured gesture-analysis events."""
+
+    def log_gesture_candidate(self, event: GestureObservationEvent) -> None:
+        """Record a pending gesture candidate."""
+
+    def log_confirmed_trigger(self, event: GestureObservationEvent) -> None:
+        """Record a confirmed trigger."""
+
+    def log_cooldown_suppression(self, event: GestureObservationEvent) -> None:
+        """Record a gesture that was suppressed by cooldown."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +76,19 @@ class MotionMetrics:
         """Return downward motion dominance over lateral and depth drift."""
         return abs(self.delta_y) / max(abs(self.delta_x) + abs(self.delta_z), 1e-6)
 
+    def to_velocity_stats(self) -> VelocityStats:
+        """Convert gesture metrics into the observability velocity schema."""
+        return VelocityStats(
+            elapsed=self.elapsed,
+            delta_x=self.delta_x,
+            delta_y=self.delta_y,
+            delta_z=self.delta_z,
+            net_velocity=self.net_velocity,
+            peak_x_velocity=self.peak_x_velocity,
+            peak_y_velocity=self.peak_y_velocity,
+            peak_z_velocity=self.peak_z_velocity,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class PendingGesture:
@@ -86,9 +114,10 @@ COMPARISON_EPSILON = 1e-9
 class GestureDetector:
     """Detect percussion gestures from normalized wrist trajectories."""
 
-    def __init__(self, config: GestureConfig) -> None:
-        """Store gesture thresholds and initialize state."""
+    def __init__(self, config: GestureConfig, *, observer: GestureObserver | None = None) -> None:
+        """Store gesture thresholds, initialize state, and configure observability."""
         self.config = config
+        self.observer = observer
         self._histories: dict[str, HandHistory] = {
             "left": HandHistory(deque(maxlen=config.history_size)),
             "right": HandHistory(deque(maxlen=config.history_size)),
@@ -144,13 +173,14 @@ class GestureDetector:
             history.pending = None
             return None, None
 
-        if timestamp.seconds - history.last_trigger_time < self.config.cooldown_seconds:
-            history.pending = None
-            return None, None
-
         metrics = self._compute_metrics(history.samples)
         if metrics is None:
             history.pending = None
+            return None, None
+
+        if timestamp.seconds - history.last_trigger_time < self.config.cooldown_seconds:
+            history.pending = None
+            self._emit_cooldown_suppressed(timestamp, hand, metrics)
             return None, None
 
         if history.pending is not None and (
@@ -163,7 +193,9 @@ class GestureDetector:
             history.pending = self._start_candidate(timestamp.seconds, metrics)
             if history.pending is None:
                 return None, None
-            return self._build_candidate(history.pending.gesture, hand, metrics), None
+            candidate = self._build_candidate(history.pending.gesture, hand, metrics)
+            self._emit_candidate(timestamp, candidate, metrics)
+            return candidate, None
 
         candidate = self._build_candidate(history.pending.gesture, hand, metrics)
         if not self._is_confirmed(history.pending.gesture, metrics):
@@ -172,7 +204,9 @@ class GestureDetector:
         gesture = history.pending.gesture
         history.pending = None
         history.last_trigger_time = timestamp.seconds
-        return None, self._build_event(gesture, hand, timestamp, metrics)
+        event = self._build_event(gesture, hand, timestamp, metrics)
+        self._emit_trigger(event, metrics)
+        return None, event
 
     def _start_candidate(self, timestamp: float, metrics: MotionMetrics) -> PendingGesture | None:
         """Create a pending gesture if the current window has valid onset motion."""
@@ -318,7 +352,7 @@ class GestureDetector:
         )
 
     def _meets_strike_candidate(self, metrics: MotionMetrics) -> bool:
-        """Return whether current motion is a viable downward-strike candidate."""
+        """Return whether current motion is a viable strike candidate."""
         return (
             metrics.delta_y
             >= self.config.strike_down_delta_y * self.config.candidate_ratio
@@ -334,26 +368,83 @@ class GestureDetector:
         )
 
     def _is_confirmed(self, gesture: GestureType, metrics: MotionMetrics) -> bool:
-        """Return whether a pending gesture has crossed its final trigger threshold."""
+        """Return whether a pending gesture now exceeds the final trigger thresholds."""
         if gesture is GestureType.KICK:
             return (
-                metrics.delta_z
-                <= -self.config.punch_forward_delta_z + COMPARISON_EPSILON
+                metrics.delta_z <= -self.config.punch_forward_delta_z + COMPARISON_EPSILON
                 and abs(metrics.delta_y)
                 <= self.config.punch_max_vertical_drift + COMPARISON_EPSILON
-                and metrics.forward_velocity
-                >= self.config.min_velocity - COMPARISON_EPSILON
+                and metrics.forward_velocity >= self.config.min_velocity - COMPARISON_EPSILON
                 and metrics.net_velocity >= self.config.min_velocity - COMPARISON_EPSILON
                 and metrics.punch_axis_ratio
                 >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
             )
         return (
             metrics.delta_y >= self.config.strike_down_delta_y - COMPARISON_EPSILON
-            and abs(metrics.delta_z)
-            <= self.config.strike_max_depth_drift + COMPARISON_EPSILON
-            and metrics.downward_velocity
-            >= self.config.min_velocity - COMPARISON_EPSILON
+            and abs(metrics.delta_z) <= self.config.strike_max_depth_drift + COMPARISON_EPSILON
+            and metrics.downward_velocity >= self.config.min_velocity - COMPARISON_EPSILON
             and metrics.net_velocity >= self.config.min_velocity - COMPARISON_EPSILON
             and metrics.strike_axis_ratio
             >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
+        )
+
+    def _emit_candidate(
+        self,
+        timestamp: FrameTimestamp,
+        candidate: DetectionCandidate,
+        metrics: MotionMetrics,
+    ) -> None:
+        """Send a gesture-candidate observation to the configured observer."""
+        if self.observer is None:
+            return
+        self.observer.log_gesture_candidate(
+            GestureObservationEvent(
+                timestamp=timestamp.seconds,
+                event_kind="candidate",
+                gesture_type=candidate.gesture,
+                accepted=False,
+                reason=candidate.label,
+                velocity_stats=metrics.to_velocity_stats(),
+                confidence=candidate.confidence,
+                hand=candidate.hand,
+            )
+        )
+
+    def _emit_trigger(self, event: GestureEvent, metrics: MotionMetrics) -> None:
+        """Send a confirmed-trigger observation to the configured observer."""
+        if self.observer is None:
+            return
+        self.observer.log_confirmed_trigger(
+            GestureObservationEvent(
+                timestamp=event.timestamp.seconds,
+                event_kind="trigger",
+                gesture_type=event.gesture,
+                accepted=True,
+                reason=event.label,
+                velocity_stats=metrics.to_velocity_stats(),
+                confidence=event.confidence,
+                hand=event.hand,
+            )
+        )
+
+    def _emit_cooldown_suppressed(
+        self,
+        timestamp: FrameTimestamp,
+        hand: str,
+        metrics: MotionMetrics,
+    ) -> None:
+        """Send a cooldown-suppression observation to the configured observer."""
+        if self.observer is None:
+            return
+        self.observer.log_cooldown_suppression(
+            GestureObservationEvent(
+                timestamp=timestamp.seconds,
+                event_kind="cooldown_suppressed",
+                gesture_type=None,
+                accepted=False,
+                reason="cooldown_active",
+                velocity_stats=metrics.to_velocity_stats(),
+                confidence=None,
+                hand=hand,
+            )
         )

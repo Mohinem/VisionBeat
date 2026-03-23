@@ -22,6 +22,9 @@ def test_load_config_supports_nested_yaml_sections() -> None:
     }
     assert config.debug.overlays.show_debug_panel is True
     assert config.logging.level == "INFO"
+    assert config.logging.structured is True
+    assert config.logging.event_log_path is None
+    assert config.logging.event_log_format == "jsonl"
 
 
 def test_load_config_supports_toml_with_nested_sections(tmp_path: Path) -> None:
@@ -50,6 +53,9 @@ show_debug_panel = true
 
 [logging]
 level = "debug"
+structured = false
+event_log_path = "logs/events.csv"
+event_log_format = "csv"
 """.strip(),
         encoding="utf-8",
     )
@@ -62,6 +68,9 @@ level = "debug"
     assert config.audio.sample_mapping["clap"] == "custom/clap.wav"
     assert config.debug.overlays.draw_landmarks is False
     assert config.logging.level == "DEBUG"
+    assert config.logging.structured is False
+    assert config.logging.event_log_path == "logs/events.csv"
+    assert config.logging.event_log_format == "csv"
 
 
 @pytest.mark.parametrize(
@@ -82,6 +91,10 @@ level = "debug"
         (
             "debug:\n  overlays:\n    unknown: true\n",
             "debug.overlays: unknown field(s): unknown",
+        ),
+        (
+            "logging:\n  event_log_format: parquet\n",
+            "logging.event_log_format: must be either \'jsonl\' or \'csv\'",
         ),
     ],
 )

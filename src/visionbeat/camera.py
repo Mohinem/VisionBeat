@@ -9,6 +9,7 @@ from typing import Any
 
 from visionbeat.config import CameraConfig
 from visionbeat.interfaces import CameraSource as CameraSourceProtocol
+from visionbeat.observability import ObservabilityRecorder
 
 logger = logging.getLogger(__name__)
 Frame = Any
@@ -28,6 +29,7 @@ class CameraSource(CameraSourceProtocol):
     """OpenCV-backed camera source with configurable frame size and FPS targets."""
 
     config: CameraConfig
+    recorder: ObservabilityRecorder | None = None
     _cv2: Any | None = field(default=None)
     _capture: Any = field(default=None)
     _frame_index: int = field(default=0, init=False)
@@ -51,10 +53,28 @@ class CameraSource(CameraSourceProtocol):
         self._capture.set(self._cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
         self._capture.set(self._cv2.CAP_PROP_FPS, self.config.fps)
         if not self._capture.isOpened():
+            if self.recorder is not None:
+                self.recorder.log_camera_initialization(
+                    device_index=self.config.device_index,
+                    width=self.config.width,
+                    height=self.config.height,
+                    target_fps=self.config.fps,
+                    mirror=self.config.mirror,
+                    opened=False,
+                )
             self._capture.release()
             self._capture = None
             raise RuntimeError(f"Unable to open webcam device {self.config.device_index}.")
         self._frame_index = 0
+        if self.recorder is not None:
+            self.recorder.log_camera_initialization(
+                device_index=self.config.device_index,
+                width=self.config.width,
+                height=self.config.height,
+                target_fps=self.config.fps,
+                mirror=self.config.mirror,
+                opened=True,
+            )
         logger.info("Camera device %s opened successfully", self.config.device_index)
 
     def read(self) -> Frame:
