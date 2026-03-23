@@ -1,0 +1,37 @@
+log_level = "INFO"
+
+[camera]
+device_index = 0
+width = 1280
+height = 720
+fps = 30
+mirror = true
+window_name = "VisionBeat"
+
+[tracker]
+model_complexity = 1
+min_detection_confidence = 0.55
+min_tracking_confidence = 0.55
+enable_segmentation = false
+
+[gestures]
+punch_forward_delta_z = 0.18
+punch_max_vertical_drift = 0.12
+strike_down_delta_y = 0.22
+strike_max_depth_drift = 0.14
+min_velocity = 0.5
+cooldown_seconds = 0.18
+history_size = 6
+active_hand = "right"
+
+[audio]
+sample_rate = 44100
+buffer_size = 256
+kick_sample = "assets/samples/kick.wav"
+snare_sample = "assets/samples/snare.wav"
+volume = 0.9
+
+[overlay]
+draw_landmarks = true
+draw_velocity_vectors = true
+show_debug_panel = true
