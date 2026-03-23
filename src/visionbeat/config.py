@@ -15,15 +15,11 @@ def _require_positive_int(value: int, *, field_name: str) -> int:
         raise ValueError(f"{field_name} must be greater than zero.")
     return value
 
-
-
 def _require_non_negative_int(value: int, *, field_name: str) -> int:
     """Return a validated non-negative integer."""
     if value < 0:
         raise ValueError(f"{field_name} must be greater than or equal to zero.")
     return value
-
-
 
 def _require_probability(value: float, *, field_name: str) -> float:
     """Return a validated probability-like value in the inclusive range [0, 1]."""
@@ -283,8 +279,6 @@ class AppConfig:
             overlay=OverlayConfig.from_dict(payload.get("overlay", {})),
             log_level=payload.get("log_level", "INFO"),
         )
-
-
 
 def load_config(path: str | Path) -> AppConfig:
     """Load application configuration from a TOML file on disk."""

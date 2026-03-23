@@ -1,5 +1,5 @@
 """VisionBeat package."""
 
-from visionbeat.app import VisionBeatApp
+__all__ = ["__version__"]
 
-__all__ = ["VisionBeatApp"]
+__version__ = "0.1.0"

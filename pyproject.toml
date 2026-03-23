@@ -47,6 +47,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-q --cov=visionbeat --cov-report=term-missing"
 testpaths = ["tests"]
+markers = [
+  "webcam: tests that require access to a physical webcam",
+]
 
 [tool.ruff]
 line-length = 100
@@ -57,7 +60,7 @@ select = ["E", "F", "I", "B", "UP", "D"]
 ignore = ["D203", "D212"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["D100", "D103"]
+"tests/*.py" = ["D100", "D101", "D102", "D103", "D107"]
 
 [tool.mypy]
 python_version = "3.11"
