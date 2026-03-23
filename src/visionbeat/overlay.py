@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import Any, Protocol, cast
 
 from visionbeat.config import OverlayConfig
-from visionbeat.models import GestureEvent, PoseFrame
+from visionbeat.models import RenderState
 
 Frame = Any
 
@@ -62,6 +62,7 @@ class Cv2Protocol(Protocol):
         """Draw a rectangle on a frame."""
         raise NotImplementedError
 
+
 _LANDMARK_CONNECTIONS: tuple[tuple[str, str], ...] = (
     ("left_shoulder", "right_shoulder"),
     ("left_shoulder", "left_elbow"),
@@ -79,24 +80,44 @@ class OverlayRenderer:
         self.config = config
         self._cv2 = cv2_module
 
-    def render(self, frame: Frame, pose: PoseFrame, events: Sequence[GestureEvent]) -> Frame:
-        """Render landmarks, status, and the latest gesture labels on a frame copy."""
+    def render(self, frame: Frame, state: RenderState) -> Frame:
+        """Render landmarks and runtime state onto a frame copy."""
         output = frame.copy()
 
         if self.config.draw_landmarks:
-            draw_pose_landmarks(output, pose, cv2_module=self._cv2)
+            draw_pose_landmarks(output, state.pose, cv2_module=self._cv2)
 
         if self.config.show_debug_panel:
-            labels = [event.label for event in events[-2:]]
-            if not labels:
-                labels = [
-                    "Tracking lost"
-                    if not pose.person_detected
-                    else pose.status.replace("_", " ")
-                ]
-            draw_labels(output, [f"VisionBeat ({pose.status})", *labels], cv2_module=self._cv2)
+            draw_labels(output, _build_debug_labels(state), cv2_module=self._cv2)
 
         return output
+
+
+def _build_debug_labels(state: RenderState) -> list[str]:
+    """Build human-readable overlay lines from render state."""
+    labels = [
+        f"VisionBeat ({state.pose.status})",
+        f"Frame: {state.frame_index}",
+        f"FPS: {state.fps:.1f}" if state.fps is not None else "FPS: --",
+        (
+            f"Candidate: {state.current_candidate.label} "
+            f"[{state.current_candidate.confidence:.2f}]"
+        )
+        if state.current_candidate is not None
+        else "Candidate: none",
+        (
+            f"Confirmed: {state.confirmed_gesture.label} "
+            f"[{state.confirmed_gesture.confidence:.2f}]"
+        )
+        if state.confirmed_gesture is not None
+        else "Confirmed: none",
+        (
+            f"Cooldown: {state.cooldown_remaining_seconds:.2f}s"
+            if state.cooldown_remaining_seconds > 0.0
+            else "Cooldown: ready"
+        ),
+    ]
+    return labels
 
 
 def _get_cv2_module(cv2_module: Cv2Protocol | None) -> Cv2Protocol:
@@ -111,7 +132,7 @@ def _get_cv2_module(cv2_module: Cv2Protocol | None) -> Cv2Protocol:
 
 def draw_pose_landmarks(
     frame: Frame,
-    pose: PoseFrame,
+    pose: Any,
     *,
     cv2_module: Cv2Protocol | None = None,
 ) -> Frame:

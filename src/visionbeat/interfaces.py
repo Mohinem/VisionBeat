@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Protocol, runtime_checkable
 
-from visionbeat.models import AudioTrigger, FrameTimestamp, GestureEvent, TrackerOutput
+from visionbeat.models import AudioTrigger, FrameTimestamp, GestureEvent, RenderState, TrackerOutput
 
 Frame = Any
 
@@ -58,10 +58,5 @@ class AudioEngine(Protocol):
 class OverlayRenderer(Protocol):
     """Interface for renderers that draw tracker and gesture state onto frames."""
 
-    def render(
-        self,
-        frame: Frame,
-        pose: TrackerOutput,
-        events: Sequence[GestureEvent],
-    ) -> Frame:
+    def render(self, frame: Frame, state: RenderState) -> Frame:
         """Return a rendered frame containing visual debugging or performance overlays."""

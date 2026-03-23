@@ -265,4 +265,35 @@ class TrackerOutput:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class RenderState:
+    """Business-state payload consumed by the overlay renderer."""
+
+    pose: TrackerOutput
+    frame_index: int
+    fps: float | None = None
+    current_candidate: DetectionCandidate | None = None
+    confirmed_gesture: GestureEvent | None = None
+    cooldown_remaining_seconds: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Validate loop-derived overlay state values."""
+        frame_index = int(self.frame_index)
+        if frame_index < 0:
+            raise ValueError("frame_index must be greater than or equal to zero.")
+        object.__setattr__(self, "frame_index", frame_index)
+        if self.fps is not None:
+            fps = _coerce_float(self.fps, field_name="fps")
+            if fps <= 0.0:
+                raise ValueError("fps must be greater than zero when provided.")
+            object.__setattr__(self, "fps", fps)
+        cooldown = _coerce_float(
+            self.cooldown_remaining_seconds,
+            field_name="cooldown_remaining_seconds",
+        )
+        if cooldown < 0.0:
+            raise ValueError("cooldown_remaining_seconds must be greater than or equal to zero.")
+        object.__setattr__(self, "cooldown_remaining_seconds", cooldown)
+
+
 PoseFrame = TrackerOutput

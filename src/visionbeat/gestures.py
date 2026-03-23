@@ -100,6 +100,13 @@ class GestureDetector:
         """Return the currently active pending gesture candidates."""
         return self._last_candidates
 
+    def cooldown_remaining(self, timestamp: FrameTimestamp | float) -> float:
+        """Return the remaining detector cooldown for the configured active hand."""
+        seconds = timestamp.seconds if isinstance(timestamp, FrameTimestamp) else float(timestamp)
+        history = self._histories[self.config.active_hand]
+        elapsed = seconds - history.last_trigger_time
+        return max(0.0, self.config.cooldown_seconds - elapsed)
+
     def update(self, frame: TrackerOutput) -> list[GestureEvent]:
         """Consume tracker output and emit any newly detected gestures."""
         events: list[GestureEvent] = []
