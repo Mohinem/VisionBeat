@@ -45,11 +45,20 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.pytest.ini_options]
-addopts = "-q --cov=visionbeat --cov-report=term-missing"
-testpaths = ["tests"]
+addopts = "-q --strict-markers"
+testpaths = ["tests/unit", "tests/integration"]
 markers = [
+  "integration: tests that exercise cross-module integration paths",
   "webcam: tests that require access to a physical webcam",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["src/visionbeat"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
 
 [tool.ruff]
 line-length = 100
@@ -60,7 +69,7 @@ select = ["E", "F", "I", "B", "UP", "D"]
 ignore = ["D203", "D212"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["D100", "D101", "D102", "D103", "D107"]
+"tests/**/*.py" = ["D100", "D101", "D102", "D103", "D107"]
 
 [tool.mypy]
 python_version = "3.11"

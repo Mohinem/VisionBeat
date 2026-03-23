@@ -40,5 +40,10 @@ jobs:
       - name: MyPy
         run: mypy
 
-      - name: Pytest
-        run: pytest
+      - name: Unit tests with coverage
+        run: |
+          pytest tests/unit --cov=visionbeat --cov-report=term-missing --cov-report=xml
+
+      - name: Integration tests (mocked paths)
+        run: |
+          pytest tests/integration -m 'not webcam'
