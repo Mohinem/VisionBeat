@@ -4,10 +4,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from visionbeat.app import VisionBeatRuntime
+from visionbeat.app import VisionBeatApp, VisionBeatRuntime
 from visionbeat.camera import CameraFrame
 from visionbeat.config import AppConfig
 from visionbeat.models import (
+    AudioTrigger,
     DetectionCandidate,
     FrameTimestamp,
     GestureEvent,
@@ -86,10 +87,10 @@ class FakeDetector:
 
 class FakeAudio:
     def __init__(self) -> None:
-        self.triggers: list[object] = []
+        self.triggers: list[AudioTrigger] = []
         self.close_calls = 0
 
-    def trigger(self, trigger: object) -> None:
+    def trigger(self, trigger: AudioTrigger) -> None:
         self.triggers.append(trigger)
 
     def close(self) -> None:
@@ -121,14 +122,50 @@ class FakePreview:
         self.close_calls += 1
 
 
-def make_pose(timestamp: float) -> TrackerOutput:
+class FakeRecorder:
+    def __init__(self) -> None:
+        self.runtime_started: list[str] = []
+        self.runtime_stopped: list[str] = []
+        self.tracking_failures: list[tuple[float, str]] = []
+        self.shutdown_calls = 0
+        self.close_calls = 0
+        self.app_startups: list[dict[str, object]] = []
+
+    def log_app_startup(self, *, config_summary: dict[str, object]) -> None:
+        self.app_startups.append(config_summary)
+
+    def log_app_shutdown(self) -> None:
+        self.shutdown_calls += 1
+
+    def log_runtime_started(self, *, window_name: str) -> None:
+        self.runtime_started.append(window_name)
+
+    def log_runtime_stopped(self, *, reason: str) -> None:
+        self.runtime_stopped.append(reason)
+
+    def log_tracking_failure(self, *, timestamp: float, status: str) -> None:
+        self.tracking_failures.append((timestamp, status))
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+def make_pose(
+    timestamp: float,
+    *,
+    status: str = "tracking",
+    person_detected: bool = True,
+) -> TrackerOutput:
+    landmarks = (
+        {"right_wrist": LandmarkPoint(x=0.6, y=0.4, z=-0.3, visibility=0.9)}
+        if person_detected
+        else {}
+    )
     return TrackerOutput(
         timestamp=FrameTimestamp(seconds=timestamp),
-        landmarks={
-            "right_wrist": LandmarkPoint(x=0.6, y=0.4, z=-0.3, visibility=0.9),
-        },
-        person_detected=True,
-        status="tracking",
+        landmarks=landmarks,
+        person_detected=person_detected,
+        status=status,
     )
 
 
@@ -173,6 +210,8 @@ def test_runtime_orchestrates_tracking_detection_audio_and_overlay() -> None:
     assert tracker.process_calls[0][0] is frame
     assert detector.update_calls[0].status == "tracking"
     assert len(audio.triggers) == 1
+    assert audio.triggers[0].gesture is GestureType.KICK
+    assert audio.triggers[0].intensity == pytest.approx(0.91)
     state = overlay.calls[0][1]
     assert state.pose.status == "tracking"
     assert state.current_candidate == candidate
@@ -197,6 +236,7 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
     audio = FakeAudio()
     overlay = FakeOverlay()
     preview = FakePreview([False, True])
+    recorder = FakeRecorder()
     runtime = VisionBeatRuntime(
         config=AppConfig(),
         camera=camera,
@@ -205,10 +245,15 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
         audio=audio,
         overlay=overlay,
         preview=preview,
+        recorder=recorder,
     )
 
     runtime.run()
 
+    assert recorder.runtime_started == ["VisionBeat"]
+    assert recorder.runtime_stopped == ["user_request"]
+    assert recorder.shutdown_calls == 1
+    assert recorder.close_calls == 1
     assert camera.open_calls == 1
     assert camera.close_calls == 1
     assert tracker.close_calls == 1
@@ -253,3 +298,131 @@ def test_runtime_keeps_last_confirmed_gesture_visible_until_replaced() -> None:
     assert first_state.confirmed_gesture == event
     assert second_state.confirmed_gesture == event
     assert second_state.cooldown_remaining_seconds == 0.04
+
+
+def test_runtime_records_tracking_failures_for_non_tracking_status() -> None:
+    recorder = FakeRecorder()
+    runtime = VisionBeatRuntime(
+        config=AppConfig(),
+        camera=FakeCamera(
+            [CameraFrame(image=FakeFrame("frame-0"), captured_at=3.0, frame_index=2)]
+        ),
+        tracker=FakeTracker(
+            [make_pose(3.0, status="no_person_detected", person_detected=False)]
+        ),
+        detector=FakeDetector(
+            events_by_frame=[[]],
+            candidates_by_frame=[()],
+            cooldowns=[0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False]),
+        recorder=recorder,
+    )
+
+    runtime.process_next_frame()
+
+    assert recorder.tracking_failures == [(3.0, "no_person_detected")]
+
+
+def test_compute_fps_handles_initial_non_increasing_and_increasing_timestamps() -> None:
+    runtime = VisionBeatRuntime(
+        config=AppConfig(),
+        camera=FakeCamera([]),
+        tracker=FakeTracker([]),
+        detector=FakeDetector(events_by_frame=[], candidates_by_frame=[], cooldowns=[]),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([]),
+    )
+
+    first = runtime._compute_fps(
+        CameraFrame(image=FakeFrame("frame-0"), captured_at=1.0, frame_index=0)
+    )
+    second = runtime._compute_fps(
+        CameraFrame(image=FakeFrame("frame-1"), captured_at=1.0, frame_index=1)
+    )
+    third = runtime._compute_fps(
+        CameraFrame(image=FakeFrame("frame-2"), captured_at=1.25, frame_index=2)
+    )
+
+    assert first is None
+    assert second is None
+    assert third == pytest.approx(4.0)
+
+
+def test_select_candidate_prefers_highest_confidence() -> None:
+    best = DetectionCandidate(
+        gesture=GestureType.KICK,
+        confidence=0.9,
+        hand="right",
+        label="best",
+    )
+    detector = FakeDetector(
+        events_by_frame=[],
+        candidates_by_frame=[],
+        cooldowns=[],
+    )
+    detector._candidates = (
+        DetectionCandidate(gesture=GestureType.SNARE, confidence=0.4, hand="right", label="weak"),
+        best,
+    )
+    runtime = VisionBeatRuntime(
+        config=AppConfig(),
+        camera=FakeCamera([]),
+        tracker=FakeTracker([]),
+        detector=detector,
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([]),
+    )
+
+    assert runtime._select_candidate() == best
+
+
+def test_visionbeat_app_builds_runtime_from_default_dependency_factories(monkeypatch) -> None:
+    recorder = FakeRecorder()
+    created: dict[str, object] = {}
+
+    class StubCamera:
+        def __init__(self, config, recorder=None) -> None:
+            created["camera"] = (config, recorder)
+
+    class StubTracker:
+        def __init__(self, config) -> None:
+            created["tracker"] = config
+
+    class StubDetector:
+        def __init__(self, config, observer=None) -> None:
+            created["detector"] = (config, observer)
+
+    class StubAudio:
+        def close(self) -> None:
+            return None
+
+    class StubOverlay:
+        def __init__(self, config) -> None:
+            created["overlay"] = config
+
+    class StubPreview:
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("visionbeat.app.build_observability_recorder", lambda config: recorder)
+    monkeypatch.setattr("visionbeat.app.CameraSource", StubCamera)
+    monkeypatch.setattr("visionbeat.app.PoseTracker", StubTracker)
+    monkeypatch.setattr("visionbeat.app.GestureDetector", StubDetector)
+    monkeypatch.setattr("visionbeat.app.create_audio_engine", lambda config: StubAudio())
+    monkeypatch.setattr("visionbeat.app.OverlayRenderer", StubOverlay)
+    monkeypatch.setattr("visionbeat.app.OpenCVPreviewWindow", StubPreview)
+
+    app = VisionBeatApp(AppConfig())
+
+    assert isinstance(app.runtime, VisionBeatRuntime)
+    assert created["camera"][0] == app.config.camera
+    assert created["camera"][1] is recorder
+    assert created["tracker"] == app.config.tracker
+    assert created["detector"] == (app.config.gestures, recorder)
+    assert created["overlay"] == app.config.overlay
+    assert recorder.app_startups[0]["camera_resolution"] == "1280x720"

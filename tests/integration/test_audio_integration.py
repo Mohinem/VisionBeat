@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from visionbeat.audio import PygameAudioEngine, create_audio_engine
 from visionbeat.config import AudioConfig, load_config
+
+pytestmark = pytest.mark.integration
 
 
 class IntegrationSound:
