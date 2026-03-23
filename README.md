@@ -1,53 +1,105 @@
 # VisionBeat
 
-VisionBeat is a production-oriented Python project for a **webcam-based gestural percussion instrument**. It uses OpenCV for live camera input, MediaPipe for upper-body landmark tracking, and `pygame.mixer` for low-latency sample triggering. The initial gesture set maps:
+VisionBeat is a **camera-based gestural percussion instrument** built in Python. A webcam observes upper-body motion, MediaPipe estimates arm landmarks, a gesture detector classifies rhythmic strikes, and an audio engine triggers drum samples in real time. The current prototype focuses on two core performance gestures:
 
 - **Forward punch → kick**
 - **Downward strike → snare**
 
-The codebase is intentionally modular so that the gesture recognition layer can be tested in isolation from webcam hardware or MediaPipe runtime dependencies.
+The project is deliberately framed as both a **research prototype** and a **performable instrument**. It is useful for studying embodied rhythm interaction, but it is also structured so that a performer can stand in front of a single webcam and play drum-like patterns without wearing sensors or holding a controller.
 
-## Features
+## Research motivation
 
-- Real-time webcam frame capture and display with OpenCV
-- MediaPipe pose-based wrist and upper-body tracking
-- Gesture detection isolated in a pure Python module
-- Low-latency kick/snare sample playback with pygame
-- Structured configuration using validated YAML or TOML files
-- Logging with Python's built-in `logging`
-- Unit tests with pytest
-- CI for linting, type checking, and tests
-- Architecture and contributor documentation
+VisionBeat is motivated by a simple question: **how can rhythmic intent be inferred from full-body motion with minimal instrumentation?** Instead of attaching IMUs or custom gloves, VisionBeat treats the webcam as the sensing surface and the performer’s arm movement as the control vocabulary.
 
-## Project layout
+That framing matters for research in at least four ways:
+
+1. **Embodied interaction**: percussion performance is inherently physical, so the system emphasizes gross, visible motion rather than abstract GUI control.
+2. **Accessible sensing**: a commodity webcam lowers the barrier to building and reproducing gesture-controlled music systems.
+3. **Transparent heuristics**: the gesture layer is rule-based and testable, making it easier to explain why a hit triggered or failed.
+4. **Extensible architecture**: the current kick/snare prototype can evolve into a broader platform for gesture studies, multimodal rhythm interfaces, or hybrid audio engines.
+
+## Instrument framing
+
+VisionBeat should be presented as an **embodied rhythm instrument**, not just a pose-recognition demo. The player performs percussive intent through arm trajectories:
+
+- a **forward jab** feels like a bass-drum attack,
+- a **downward hit** feels like a snare accent,
+- the webcam becomes the sensing membrane,
+- and the gesture detector becomes the instrument’s strike interpretation layer.
+
+This framing helps clarify the design choices throughout the repository:
+
+- the active gestures are intentionally percussive rather than symbolic,
+- thresholds are exposed because performers have different movement styles,
+- the overlay provides immediate instrumental feedback,
+- and the audio path is separated so the system can later support lower-latency playback, MIDI, or plugin-based output.
+
+## Research presentation narrative
+
+If you need a short presentation story, use something like this:
+
+> VisionBeat is a camera-based gestural percussion instrument for embodied rhythm performance. A single webcam tracks the performer’s upper body, interprets punch-like and strike-like arm motions as drum hits, and plays percussion samples in real time. The project sits between HCI research and digital instrument design: it asks how rhythmic intention can be expressed through visible, full-body movement while keeping the sensing setup lightweight, transparent, and reproducible.
+
+## What the system currently does
+
+- captures live webcam frames with OpenCV,
+- tracks shoulders, elbows, and wrists through MediaPipe Pose,
+- converts wrist motion into normalized temporal trajectories,
+- detects kick and snare gestures using configurable heuristic thresholds,
+- plays local samples with a pygame-backed audio engine,
+- renders landmark and debug overlays,
+- validates YAML/TOML configuration,
+- and supports unit/integration tests for the main subsystems.
+
+## System overview
+
+VisionBeat runs as a real-time pipeline:
+
+1. **Camera capture** acquires mirrored webcam frames.
+2. **Tracking** extracts upper-body landmarks.
+3. **Gesture detection** evaluates recent wrist motion history.
+4. **Audio dispatch** maps confirmed gestures to percussion samples.
+5. **Overlay rendering** displays tracking state, candidates, confirmations, and cooldown.
+
+For a deeper breakdown, see [`docs/architecture.md`](docs/architecture.md).
+
+## Repository layout
 
 ```text
 visionbeat/
-├── assets/samples/           # Text docs + generated local drum samples
-├── configs/                  # TOML configuration files
-├── docs/                     # Architecture and project documentation
-├── scripts/                  # Utility scripts
+├── assets/samples/           # Sample-asset policy and generated local WAVs
+├── configs/                  # YAML/TOML runtime configuration
+├── docs/                     # Project documentation
+├── scripts/                  # Utility scripts such as demo sample generation
 ├── src/visionbeat/           # Application package
-├── tests/                    # Pytest suite
-└── .github/workflows/        # CI definitions
+└── tests/                    # Unit and integration tests
 ```
 
 ## Requirements
 
+### Software
+
 - Python 3.11+
-- A webcam
-- Platform support for OpenCV, MediaPipe, and pygame
+- pip
+- platform support for OpenCV, MediaPipe, and pygame
+
+### Hardware
+
+- a webcam,
+- speakers or headphones,
+- enough light for upper-body tracking,
+- and enough space for the performer’s wrists and forearms to remain visible.
 
 ## Quick start
 
-### 1. Create and activate a virtual environment
+### 1. Create a virtual environment
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 2. Install the project
+### 2. Install VisionBeat and development tools
 
 ```bash
 python -m pip install --upgrade pip
@@ -56,55 +108,76 @@ python -m pip install -e .[dev]
 
 ### 3. Generate local placeholder drum samples
 
-Generate the local WAV files before the first run (they are intentionally not committed):
+The repository intentionally does not commit the generated demo WAV files. Create them locally before the first run:
 
 ```bash
 python scripts/generate_demo_samples.py
 ```
 
-### 4. Run VisionBeat
+### 4. Run the application
 
 ```bash
 visionbeat --config configs/default.yaml
 ```
 
-Press `q` or `Esc` to exit.
+You can also override the webcam index from the CLI:
 
-## Configuration
-
-VisionBeat loads settings from a YAML or TOML file. The default sample config lives at `configs/default.yaml` and controls:
-
-- camera device, resolution, and mirroring
-- MediaPipe confidence thresholds
-- gesture thresholds and cooldown windows
-- sample file paths, backend selection, and output settings
-- overlay visibility and debug options
-
-Example:
-
-```yaml
-gestures:
-  thresholds:
-    punch_forward_delta_z: 0.2
-    strike_down_delta_y: 0.26
-  cooldowns:
-    trigger_seconds: 0.2
-  active_hand: right
+```bash
+visionbeat --config configs/default.yaml --camera-index 1
 ```
 
-## Gesture architecture
+Press `q` or `Esc` to exit.
 
-The most important design decision is the separation between tracking and gesture recognition:
+## Local run workflow
 
-- `PoseTracker` converts MediaPipe output into a `PoseFrame` dataclass.
-- `GestureDetector` accepts `PoseFrame` objects and emits typed `GestureEvent` results.
-- Tests build `PoseFrame` values directly, so the core gesture logic remains deterministic and unit-testable.
+A practical local development loop looks like this:
 
-This means you can improve or replace the tracker without rewriting gesture tests.
+1. install dependencies,
+2. generate demo samples,
+3. stand centered in front of the webcam,
+4. verify that shoulders, elbows, and wrists appear in the overlay,
+5. test the **forward punch** gesture first,
+6. then test the **downward strike** gesture,
+7. and tune thresholds if the detector is too sensitive or too conservative.
 
-## Developer workflow
+For step-by-step performer setup, see [`docs/demo_guide.md`](docs/demo_guide.md).
 
-### Run quality checks locally
+## Gesture vocabulary
+
+### Forward punch → kick
+
+A kick is triggered when the active wrist moves **toward the camera** quickly enough, with limited vertical drift and sufficient axis dominance in normalized `z`.
+
+### Downward strike → snare
+
+A snare is triggered when the active wrist moves **downward on screen** quickly enough, with limited depth drift and sufficient axis dominance in normalized `y`.
+
+The detector uses a candidate/confirmation model plus cooldown to reduce accidental retriggers. The formal definitions are documented in [`docs/gesture_definitions.md`](docs/gesture_definitions.md).
+
+## Calibration and threshold tuning
+
+Thresholds are intentionally exposed in configuration because performer style, camera placement, lens angle, lighting, and distance from the camera all change the normalized motion profile.
+
+Start with the defaults, then calibrate in this order:
+
+1. **Tracking confidence first**
+   - If landmarks flicker or disappear, adjust the camera setup before changing gesture thresholds.
+2. **Primary gesture displacement**
+   - Raise or lower `punch_forward_delta_z` and `strike_down_delta_y` based on how far the wrist must travel.
+3. **Velocity threshold**
+   - Increase `min_velocity` to reject slow drifting motion.
+4. **Axis dominance**
+   - Increase `axis_dominance_ratio` to reject diagonal or ambiguous movements.
+5. **Drift tolerances**
+   - Tighten `punch_max_vertical_drift` or `strike_max_depth_drift` if cross-axis motion causes false positives.
+6. **Cooldown and confirmation**
+   - Tune `trigger_seconds`, `analysis_window_seconds`, and `confirmation_window_seconds` for responsiveness versus stability.
+
+Detailed calibration advice is in [`docs/configuration.md`](docs/configuration.md) and [`docs/tracking.md`](docs/tracking.md).
+
+## Testing
+
+Run the main local quality checks with:
 
 ```bash
 ruff check .
@@ -112,33 +185,84 @@ mypy
 pytest
 ```
 
-### Contributor setup instructions
+For the full test strategy, markers, and hardware caveats, see [`docs/testing.md`](docs/testing.md).
 
-1. Fork or clone the repository.
-2. Create and activate a Python 3.11+ virtual environment.
-3. Install editable dependencies with `python -m pip install -e .[dev]`.
-4. Generate local placeholder samples with `python scripts/generate_demo_samples.py`.
-5. Run `ruff check .`, `mypy`, and `pytest` before opening a pull request.
+## Documentation map
 
-## Runtime notes
+- [`docs/architecture.md`](docs/architecture.md) — system architecture and module responsibilities
+- [`docs/gesture_definitions.md`](docs/gesture_definitions.md) — formal gesture definitions and trigger logic
+- [`docs/tracking.md`](docs/tracking.md) — tracking model, landmark selection, and calibration guidance
+- [`docs/audio.md`](docs/audio.md) — audio subsystem design, latency constraints, and extension paths
+- [`docs/configuration.md`](docs/configuration.md) — YAML/TOML configuration reference and threshold tuning
+- [`docs/testing.md`](docs/testing.md) — test suite structure and recommended commands
+- [`docs/demo_guide.md`](docs/demo_guide.md) — demo setup, presentation flow, and live operation tips
+- [`docs/observability.md`](docs/observability.md) — structured logs and event recording
 
-- MediaPipe Pose is used as the initial tracking backend because it can estimate shoulder, elbow, and wrist landmarks from a single webcam feed.
-- Gesture thresholds are intentionally exposed in config so they can be tuned per lighting condition, camera angle, and performer style.
-- `pygame.mixer` provides a practical baseline for sample playback. If your deployment needs lower or more deterministic audio latency, the architecture is ready for a `sounddevice` backend.
+## Troubleshooting
 
-## Documentation
+### The webcam opens, but no gestures trigger
 
-- Architecture overview: [`docs/architecture.md`](docs/architecture.md)
-- Audio subsystem guide: [`docs/audio.md`](docs/audio.md)
-- Default configuration: [`configs/default.yaml`](configs/default.yaml)
-- Configuration reference: [`docs/configuration.md`](docs/configuration.md)
-- Sample generation utility: [`scripts/generate_demo_samples.py`](scripts/generate_demo_samples.py)
-- Sample asset policy: [`assets/samples/README.md`](assets/samples/README.md)
+- Confirm the overlay shows wrists, elbows, and shoulders.
+- Make sure the active hand in config matches the hand you are performing with.
+- Move slightly slower first so the tracker can stay locked, then build speed.
+- Reduce `punch_forward_delta_z` or `strike_down_delta_y` only after verifying stable tracking.
 
-## Roadmap ideas
+### Tracking flickers or frequently reports no person detected
 
-- Add calibration routines for performer-specific gesture baselines
-- Support left- and right-hand drum mappings simultaneously
-- Add on-screen latency and confidence diagnostics
-- Introduce hand-tracking mode as an alternative to pose tracking
-- Add MIDI output for DAW integration
+- Improve lighting and avoid strong backlight.
+- Step farther back so both shoulders and wrists remain in frame.
+- Raise the camera so the arm motion stays visible during downward strikes.
+- Consider increasing `tracker.min_detection_confidence` and `tracker.min_tracking_confidence` only if your setup is otherwise stable.
+
+### Audio does not play
+
+- Regenerate samples with `python scripts/generate_demo_samples.py`.
+- Verify the configured sample paths exist.
+- Check whether pygame mixer initialization failed in the logs.
+- Try a different output device or a larger `audio.buffer_size`.
+
+### Repeated hits are dropped
+
+- The detector may be suppressing events during cooldown.
+- Reduce `gestures.cooldowns.trigger_seconds` if you need faster repeated strikes.
+- Check the debug panel or event log to confirm whether suppression is intentional.
+
+### Too many false positives
+
+- Increase `min_velocity`.
+- Increase `axis_dominance_ratio`.
+- Tighten cross-axis drift thresholds.
+- Shorten the performer’s setup distance if the motion is too small in normalized coordinates.
+
+## Known limitations
+
+- The system is currently optimized for **one performer** in front of **one webcam**.
+- Only two gestures are implemented by default.
+- Detection is wrist-centric and does not use finger pose, hand shape, or explicit impact modeling.
+- Fast motion, occlusion, motion blur, or poor lighting can degrade tracking quality.
+- `pygame.mixer` is a practical baseline, not a fully professional low-latency audio engine.
+- The current implementation provides sample triggering, not full timing quantization, groove modeling, or adaptive accompaniment.
+
+## Future extensions
+
+VisionBeat is intentionally modular so it can grow in several directions:
+
+- **Clap detection** using bilateral hand convergence and transient motion energy.
+- **Additional drum mappings** such as toms, hi-hats, or cymbal gestures.
+- **MIDI output** for driving DAWs, drum racks, or external hardware.
+- **JUCE integration** for a more robust low-latency audio engine or plugin workflow.
+- **Performer calibration routines** to learn personal gesture baselines.
+- **Alternative trackers** such as hand tracking or multimodal fusion.
+- **Multi-hand / ambidextrous play** with simultaneous left/right mappings.
+
+## Contributing
+
+1. Create a Python 3.11+ virtual environment.
+2. Install with `python -m pip install -e .[dev]`.
+3. Generate demo samples locally.
+4. Run linting, typing, and tests.
+5. Update documentation when behavior or configuration changes.
+
+## License
+
+VisionBeat is released under the [MIT License](LICENSE).

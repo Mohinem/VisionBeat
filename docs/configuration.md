@@ -1,33 +1,40 @@
-# VisionBeat Configuration
+# Configuration
 
-VisionBeat loads configuration at startup from either a **YAML** (`.yaml`/`.yml`) or **TOML** (`.toml`) file. The default configuration shipped with the project is [`configs/default.yaml`](../configs/default.yaml).
+## Overview
 
-Use the CLI to point at a different file:
+VisionBeat loads runtime settings from either:
+
+- a YAML file (`.yaml` or `.yml`), or
+- a TOML file (`.toml`).
+
+The default shipped config is [`configs/default.yaml`](../configs/default.yaml), and there is also a TOML example in [`configs/default.toml`](../configs/default.toml).
+
+Launch with:
 
 ```bash
 visionbeat --config configs/default.yaml
 ```
 
+Or override the camera index from the CLI:
+
+```bash
+visionbeat --config configs/default.yaml --camera-index 1
+```
+
 ## Validation behavior
 
-Configuration loading is strongly validated before the runtime starts.
+Configuration is strongly validated before the runtime starts. VisionBeat fails fast for:
 
-VisionBeat will fail fast when it encounters:
+- missing required sections,
+- wrong value types,
+- out-of-range numeric values,
+- empty strings where non-empty paths/names are expected,
+- unknown fields caused by typos,
+- and unsupported file extensions.
 
-- missing or malformed sections
-- wrong value types, such as a string where an integer is required
-- out-of-range numeric values
-- empty sample paths
-- unknown fields caused by typos or stale config keys
-- unsupported file extensions
+This is important for reproducible research demos: invalid configuration should fail clearly before live operation.
 
-Error messages include the exact config path that failed, for example:
-
-- `camera.width: expected an integer`
-- `gestures.thresholds.candidate_ratio: must be less than or equal to 1.0`
-- `debug.overlays: unknown field(s): show_landmakrs`
-
-## Default configuration
+## Default configuration reference
 
 ```yaml
 camera:
@@ -81,104 +88,173 @@ debug:
 logging:
   level: INFO
   format: '%(asctime)s | %(levelname)s | %(name)s | %(message)s'
+  structured: true
+  event_log_path: null
+  event_log_format: jsonl
 ```
 
-## Field reference
+## Section-by-section reference
 
 ### `camera`
 
-- `device_index` (`int`, default `0`): OpenCV camera device index.
-- `width` (`int`, default `1280`): Requested capture width in pixels.
-- `height` (`int`, default `720`): Requested capture height in pixels.
-- `fps` (`int`, default `30`): Requested camera frame rate.
-- `mirror` (`bool`, default `true`): Whether the preview should be mirrored horizontally.
-- `window_name` (`str`, default `VisionBeat`): Name shown on the preview window.
+Controls webcam acquisition and preview-window labeling.
+
+- `device_index` (`int`, default `0`): OpenCV capture device index.
+- `width` (`int`, default `1280`): requested capture width.
+- `height` (`int`, default `720`): requested capture height.
+- `fps` (`int`, default `30`): requested camera FPS.
+- `mirror` (`bool`, default `true`): mirrors the preview and tracked image horizontally.
+- `window_name` (`str`, default `VisionBeat`): preview-window title.
 
 ### `tracker`
 
-- `model_complexity` (`0 | 1 | 2`, default `1`): MediaPipe pose complexity level.
-- `min_detection_confidence` (`float`, default `0.55`): Minimum person-detection confidence.
-- `min_tracking_confidence` (`float`, default `0.55`): Minimum pose-tracking confidence.
-- `enable_segmentation` (`bool`, default `false`): Whether to enable MediaPipe segmentation output.
+Controls MediaPipe pose-tracking behavior.
+
+- `model_complexity` (`0 | 1 | 2`, default `1`): pose model complexity.
+- `min_detection_confidence` (`float`, default `0.55`): minimum confidence for person detection.
+- `min_tracking_confidence` (`float`, default `0.55`): minimum confidence required for retained landmarks.
+- `enable_segmentation` (`bool`, default `false`): whether to request segmentation from MediaPipe.
 
 ### `gestures`
 
+Controls wrist-history sizing, active-hand selection, timing windows, and gesture thresholds.
+
 #### `gestures.thresholds`
 
-- `punch_forward_delta_z` (`float`, default `0.2`): Minimum forward wrist travel for punch detection.
-- `punch_max_vertical_drift` (`float`, default `0.1`): Maximum vertical drift tolerated during a punch.
-- `strike_down_delta_y` (`float`, default `0.26`): Minimum downward wrist travel for downward-strike detection.
-- `strike_max_depth_drift` (`float`, default `0.1`): Maximum depth drift tolerated during a downward strike.
-- `min_velocity` (`float`, default `0.75`): Minimum motion velocity required for either gesture.
-- `candidate_ratio` (`float`, default `0.7`): Fraction of the threshold needed to keep a pending candidate alive.
-- `axis_dominance_ratio` (`float`, default `1.7`): How strongly the primary gesture axis must dominate other movement axes.
+- `punch_forward_delta_z` (`float`, default `0.2`): minimum forward travel for kick detection.
+- `punch_max_vertical_drift` (`float`, default `0.1`): maximum allowed vertical drift during a punch.
+- `strike_down_delta_y` (`float`, default `0.26`): minimum downward travel for snare detection.
+- `strike_max_depth_drift` (`float`, default `0.1`): maximum allowed depth drift during a strike.
+- `min_velocity` (`float`, default `0.75`): minimum motion speed for either gesture.
+- `candidate_ratio` (`float`, default `0.7`): ratio used to create onset thresholds below full confirmation thresholds.
+- `axis_dominance_ratio` (`float`, default `1.7`): how strongly motion must stay aligned with the gesture’s primary axis.
 
 #### `gestures.cooldowns`
 
-- `trigger_seconds` (`float`, default `0.2`): Cooldown after a confirmed gesture before the same hand can trigger again.
-- `analysis_window_seconds` (`float`, default `0.18`): Rolling time window used to evaluate motion samples.
-- `confirmation_window_seconds` (`float`, default `0.12`): Maximum time allowed to confirm a started candidate.
+- `trigger_seconds` (`float`, default `0.2`): debounce period after a confirmed hit.
+- `analysis_window_seconds` (`float`, default `0.18`): time span of wrist history considered for metrics.
+- `confirmation_window_seconds` (`float`, default `0.12`): maximum time between candidate onset and confirmation.
 
 #### `gestures` root fields
 
-- `history_size` (`int`, default `6`): Maximum wrist samples stored per hand.
-- `active_hand` (`left | right`, default `right`): Hand used for gesture detection.
+- `history_size` (`int`, default `6`): maximum wrist samples retained per hand.
+- `active_hand` (`left | right`, default `right`): the hand eligible to trigger events.
 
 ### `audio`
 
-- `backend` (`str`, default `pygame`): Audio backend. Currently only `pygame` is supported.
-- `sample_rate` (`int`, default `44100`): Mixer output sample rate.
-- `buffer_size` (`int`, default `256`): Mixer buffer size. Lower values may reduce latency but increase glitch risk.
-- `output_channels` (`int`, default `2`): Number of audio output channels.
-- `simultaneous_voices` (`int`, default `16`): Number of mixer channels available for overlapping sounds.
-- `output_device_name` (`str | null`, default `null`): Optional device name passed to `pygame.mixer`.
-- `sample_mapping` (`map[str, str]`): Gesture/sample-name to audio-file mapping.
-  - `kick` (`str`): Sample used for the punch-triggered kick.
-  - `snare` (`str`): Sample used for the downward-strike-triggered snare.
-  - Additional keys are allowed for future gesture or pad mappings.
-- `volume` (`float`, default `0.9`): Master sample playback volume in the range `0.0..1.0`.
+Controls sample playback.
 
-### `debug`
+- `backend` (`str`, default `pygame`): backend name. Currently only `pygame` is supported.
+- `sample_rate` (`int`, default `44100`): mixer sample rate.
+- `buffer_size` (`int`, default `256`): mixer buffer size.
+- `output_channels` (`int`, default `2`): channel count for mixer initialization.
+- `simultaneous_voices` (`int`, default `16`): number of overlapping mixer channels.
+- `output_device_name` (`str | null`, default `null`): optional device selection hint.
+- `sample_mapping` (`map[str, str]`): mapping from sound names to file paths.
+- `volume` (`float`, default `0.9`): master playback level in `0.0..1.0`.
 
-#### `debug.overlays`
+### `debug.overlays`
 
-- `draw_landmarks` (`bool`, default `true`): Draw tracked pose landmarks.
-- `draw_velocity_vectors` (`bool`, default `true`): Reserved toggle for velocity-vector diagnostics.
-- `show_debug_panel` (`bool`, default `true`): Draw the text debug panel with state, candidates, and cooldowns.
+Controls what the preview overlay renders.
+
+- `draw_landmarks` (`bool`, default `true`): draw the tracked upper-body skeleton.
+- `draw_velocity_vectors` (`bool`, default `true`): reserved overlay toggle for velocity diagnostics.
+- `show_debug_panel` (`bool`, default `true`): show text status/candidate/cooldown information.
 
 ### `logging`
 
-- `level` (`str`, default `INFO`): Python logging level used at startup.
-- `format` (`str`, default `%(asctime)s | %(levelname)s | %(name)s | %(message)s`): Logging format string.
+Controls log output and optional event tracing.
 
-## Tuned gesture examples
+- `level` (`str`, default `INFO`): root logging level.
+- `format` (`str`): standard log format string.
+- `structured` (`bool`, default `true`): append structured JSON payloads to log lines.
+- `event_log_path` (`str | null`, default `null`): optional file path for event tracing.
+- `event_log_format` (`jsonl | csv`, default `jsonl`): file format for event traces.
 
-These values are good starting points for the two built-in gestures:
+## Calibration guide
 
-### Forward punch tuning
+Thresholds are not one-size-fits-all. Calibration should be treated as part of setting up the instrument.
 
-```yaml
-gestures:
-  thresholds:
-    punch_forward_delta_z: 0.2
-    punch_max_vertical_drift: 0.1
-    min_velocity: 0.75
-    candidate_ratio: 0.7
-    axis_dominance_ratio: 1.7
-```
+### 1. Start from a stable camera setup
 
-This tuning favors a clear forward extension while rejecting diagonal arm swings.
+Do not tune gestures while tracking is unstable. First ensure the performer remains well framed and the wrist stays visible through the full motion arc.
 
-### Downward strike tuning
+### 2. Tune the kick gesture
 
-```yaml
-gestures:
-  thresholds:
-    strike_down_delta_y: 0.26
-    strike_max_depth_drift: 0.1
-    min_velocity: 0.75
-    candidate_ratio: 0.7
-    axis_dominance_ratio: 1.7
-```
+If forward punches do not trigger:
 
-This tuning favors a confident downward hit while filtering out shallow drops and forward jabs.
+- lower `punch_forward_delta_z` slightly,
+- or lower `min_velocity` if the performer uses softer attacks.
+
+If forward punches false-trigger during diagonal movement:
+
+- increase `axis_dominance_ratio`,
+- or tighten `punch_max_vertical_drift`.
+
+### 3. Tune the snare gesture
+
+If downward hits do not trigger:
+
+- lower `strike_down_delta_y`,
+- or slightly extend `analysis_window_seconds` if the motion unfolds more gradually.
+
+If random arm drops trigger snares:
+
+- increase `min_velocity`,
+- tighten `strike_max_depth_drift`,
+- or increase `axis_dominance_ratio`.
+
+### 4. Tune timing behavior
+
+- reduce `trigger_seconds` for faster repeated hits,
+- increase it to prevent double-triggering,
+- extend `confirmation_window_seconds` if gestures begin correctly but fail to confirm,
+- shorten it if stale partial movements confirm too late.
+
+## Example tuning scenarios
+
+### Performer stands farther from the camera
+
+Likely symptom: gestures feel too small in normalized space.
+
+Try:
+
+- lowering `punch_forward_delta_z`,
+- lowering `strike_down_delta_y`,
+- and keeping `min_velocity` high enough to avoid false positives.
+
+### Performer uses large theatrical movements
+
+Likely symptom: the system triggers too easily on expressive transitions.
+
+Try:
+
+- raising `axis_dominance_ratio`,
+- tightening drift thresholds,
+- and increasing `trigger_seconds` if one motion arc produces two hits.
+
+### Lighting is inconsistent
+
+Likely symptom: candidates disappear because landmarks flicker.
+
+Try improving the environment first, then revisit tracker confidence thresholds if needed.
+
+## Troubleshooting config errors
+
+VisionBeat reports errors with qualified config paths. Typical examples include:
+
+- `camera.width: expected an integer.`
+- `gestures.thresholds.candidate_ratio: must be less than or equal to 1.0.`
+- `logging: unknown field(s): strucutred.`
+
+When a config fails, compare it against the default config before debugging runtime behavior.
+
+## Recommended workflow for experiments
+
+If you are doing research runs or repeated demos:
+
+1. keep a copy of the baseline config,
+2. make one threshold change at a time,
+3. save event logs when evaluating changes,
+4. document the performer/camera setup alongside the config,
+5. and treat the config as part of the experimental method.
