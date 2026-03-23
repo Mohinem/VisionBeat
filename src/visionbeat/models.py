@@ -4,14 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum
-
-try:
-    from enum import StrEnum
-except ImportError:  # pragma: no cover - Python < 3.11 fallback for local tooling.
-    class StrEnum(str, Enum):
-        """Compatibility shim for Python versions without enum.StrEnum."""
-
+from enum import StrEnum
 from math import isfinite
 from typing import Any
 
@@ -21,7 +14,6 @@ class GestureType(StrEnum):
 
     KICK = "kick"
     SNARE = "snare"
-
 
 
 def _coerce_float(value: float | int, *, field_name: str) -> float:
