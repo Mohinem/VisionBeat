@@ -1,8 +1,24 @@
-import numpy as np
+from __future__ import annotations
+
+from dataclasses import dataclass
 
 from visionbeat.config import OverlayConfig
-from visionbeat.models import FrameTimestamp, LandmarkPoint, TrackerOutput
+from visionbeat.models import FrameTimestamp, LandmarkPoint, RenderState, TrackerOutput
 from visionbeat.overlay import OverlayRenderer, draw_labels, draw_pose_landmarks
+
+
+@dataclass
+class FakeFrame:
+    height: int
+    width: int
+    channels: int = 3
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return (self.height, self.width, self.channels)
+
+    def copy(self) -> FakeFrame:
+        return FakeFrame(self.height, self.width, self.channels)
 
 
 class FakeCV2:
@@ -38,7 +54,7 @@ def make_pose() -> TrackerOutput:
 
 
 def test_draw_pose_landmarks_uses_helper_primitives() -> None:
-    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+    frame = FakeFrame(100, 200)
     fake_cv2 = FakeCV2()
 
     result = draw_pose_landmarks(frame, make_pose(), cv2_module=fake_cv2)
@@ -49,7 +65,7 @@ def test_draw_pose_landmarks_uses_helper_primitives() -> None:
 
 
 def test_draw_labels_skips_empty_entries() -> None:
-    frame = np.zeros((50, 50, 3), dtype=np.uint8)
+    frame = FakeFrame(50, 50)
     fake_cv2 = FakeCV2()
 
     draw_labels(frame, ["Header", "", "Status ok"], cv2_module=fake_cv2)
@@ -59,10 +75,10 @@ def test_draw_labels_skips_empty_entries() -> None:
 
 def test_overlay_renderer_renders_debug_panel_without_events() -> None:
     renderer = OverlayRenderer(OverlayConfig(), cv2_module=FakeCV2())
-    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    frame = FakeFrame(120, 160)
     pose = TrackerOutput(timestamp=FrameTimestamp(seconds=1.0), status="no_person_detected")
 
-    output = renderer.render(frame, pose, [])
+    output = renderer.render(frame, RenderState(pose=pose, frame_index=0))
 
     assert output.shape == frame.shape
     assert output is not frame
