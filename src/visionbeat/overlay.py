@@ -3,12 +3,64 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import Any
+from typing import Any, Protocol, cast
 
 from visionbeat.config import OverlayConfig
 from visionbeat.models import GestureEvent, PoseFrame
 
 Frame = Any
+
+
+class Cv2Protocol(Protocol):
+    """Subset of OpenCV drawing APIs used by overlay rendering."""
+
+    FONT_HERSHEY_SIMPLEX: int
+
+    def line(
+        self,
+        img: Frame,
+        pt1: tuple[int, int],
+        pt2: tuple[int, int],
+        color: tuple[int, int, int],
+        thickness: int,
+    ) -> Any:
+        """Draw a line on a frame."""
+        raise NotImplementedError
+
+    def circle(
+        self,
+        img: Frame,
+        center: tuple[int, int],
+        radius: int,
+        color: tuple[int, int, int],
+        thickness: int,
+    ) -> Any:
+        """Draw a circle on a frame."""
+        raise NotImplementedError
+
+    def putText(
+        self,
+        img: Frame,
+        text: str,
+        org: tuple[int, int],
+        fontFace: int,
+        fontScale: float,
+        color: tuple[int, int, int],
+        thickness: int,
+    ) -> Any:
+        """Draw text on a frame."""
+        raise NotImplementedError
+
+    def rectangle(
+        self,
+        img: Frame,
+        pt1: tuple[int, int],
+        pt2: tuple[int, int],
+        color: tuple[int, int, int],
+        thickness: int,
+    ) -> Any:
+        """Draw a rectangle on a frame."""
+        raise NotImplementedError
 
 _LANDMARK_CONNECTIONS: tuple[tuple[str, str], ...] = (
     ("left_shoulder", "right_shoulder"),
@@ -22,7 +74,7 @@ _LANDMARK_CONNECTIONS: tuple[tuple[str, str], ...] = (
 class OverlayRenderer:
     """Draw tracking and gesture feedback onto webcam frames."""
 
-    def __init__(self, config: OverlayConfig, *, cv2_module: Any | None = None) -> None:
+    def __init__(self, config: OverlayConfig, *, cv2_module: Cv2Protocol | None = None) -> None:
         """Store overlay configuration and an optional OpenCV-compatible module."""
         self.config = config
         self._cv2 = cv2_module
@@ -47,11 +99,24 @@ class OverlayRenderer:
         return output
 
 
-def draw_pose_landmarks(frame: Frame, pose: PoseFrame, *, cv2_module: Any | None = None) -> Frame:
+def _get_cv2_module(cv2_module: Cv2Protocol | None) -> Cv2Protocol:
+    """Return the configured cv2 module or import the real OpenCV module."""
+    if cv2_module is not None:
+        return cv2_module
+
+    import cv2
+
+    return cast(Cv2Protocol, cv2)
+
+
+def draw_pose_landmarks(
+    frame: Frame,
+    pose: PoseFrame,
+    *,
+    cv2_module: Cv2Protocol | None = None,
+) -> Frame:
     """Draw tracked upper-body landmarks and simple bone connections."""
-    cv2 = cv2_module
-    if cv2 is None:
-        import cv2 as cv2  # type: ignore[no-redef]
+    cv2 = _get_cv2_module(cv2_module)
 
     height, width = frame.shape[:2]
     for start_name, end_name in _LANDMARK_CONNECTIONS:
@@ -86,13 +151,11 @@ def draw_labels(
     frame: Frame,
     labels: Iterable[str],
     *,
-    cv2_module: Any | None = None,
+    cv2_module: Cv2Protocol | None = None,
     origin: tuple[int, int] = (12, 12),
 ) -> Frame:
     """Draw a compact label panel for tracker status and recent events."""
-    cv2 = cv2_module
-    if cv2 is None:
-        import cv2 as cv2  # type: ignore[no-redef]
+    cv2 = _get_cv2_module(cv2_module)
 
     label_list = [label for label in labels if label.strip()]
     if not label_list:
