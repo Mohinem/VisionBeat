@@ -29,8 +29,12 @@ history_size = 6
 active_hand = "right"
 
 [audio]
+backend = "pygame"
 sample_rate = 44100
 buffer_size = 256
+output_channels = 2
+simultaneous_voices = 16
+output_device_name = ""
 kick_sample = "assets/samples/kick.wav"
 snare_sample = "assets/samples/snare.wav"
 volume = 0.9

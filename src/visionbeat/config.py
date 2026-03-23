@@ -192,14 +192,22 @@ class GestureConfig:
 class AudioConfig:
     """Audio subsystem configuration for sample playback."""
 
+    backend: str = "pygame"
     sample_rate: int = 44_100
     buffer_size: int = 256
+    output_channels: int = 2
+    simultaneous_voices: int = 16
+    output_device_name: str | None = None
     kick_sample: str = "assets/samples/kick.wav"
     snare_sample: str = "assets/samples/snare.wav"
     volume: float = 0.9
 
     def __post_init__(self) -> None:
         """Validate playback settings and sample path strings."""
+        backend = self.backend.strip().lower()
+        if backend != "pygame":
+            raise ValueError("backend must be 'pygame'.")
+        object.__setattr__(self, "backend", backend)
         object.__setattr__(
             self,
             "sample_rate",
@@ -210,6 +218,19 @@ class AudioConfig:
             "buffer_size",
             _require_positive_int(self.buffer_size, field_name="buffer_size"),
         )
+        object.__setattr__(
+            self,
+            "output_channels",
+            _require_positive_int(self.output_channels, field_name="output_channels"),
+        )
+        object.__setattr__(
+            self,
+            "simultaneous_voices",
+            _require_positive_int(self.simultaneous_voices, field_name="simultaneous_voices"),
+        )
+        if self.output_device_name is not None:
+            output_device_name = self.output_device_name.strip()
+            object.__setattr__(self, "output_device_name", output_device_name or None)
         if not self.kick_sample.strip():
             raise ValueError("kick_sample must not be empty.")
         if not self.snare_sample.strip():
@@ -218,11 +239,23 @@ class AudioConfig:
         object.__setattr__(self, "snare_sample", self.snare_sample.strip())
         object.__setattr__(self, "volume", _require_probability(self.volume, field_name="volume"))
 
+    @property
+    def sample_paths(self) -> dict[str, str]:
+        """Return the configured sample-path mapping keyed by trigger name."""
+        return {
+            "kick": self.kick_sample,
+            "snare": self.snare_sample,
+        }
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize the configuration into a JSON-friendly dictionary."""
         return {
+            "backend": self.backend,
             "sample_rate": self.sample_rate,
             "buffer_size": self.buffer_size,
+            "output_channels": self.output_channels,
+            "simultaneous_voices": self.simultaneous_voices,
+            "output_device_name": self.output_device_name,
             "kick_sample": self.kick_sample,
             "snare_sample": self.snare_sample,
             "volume": self.volume,
