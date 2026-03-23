@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback for local tooling.
+    import tomli as tomllib
 
 
 def _require_positive_int(value: int, *, field_name: str) -> int:

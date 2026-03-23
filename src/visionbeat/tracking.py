@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Final
 
 from visionbeat.config import TrackerConfig
 from visionbeat.models import FrameTimestamp, LandmarkPoint, TrackerOutput
 
+logger = logging.getLogger(__name__)
 Frame = Any
 _POSE_LANDMARKS: Final[dict[str, int]] = {
     "left_shoulder": 11,
@@ -21,7 +23,7 @@ _POSE_LANDMARKS: Final[dict[str, int]] = {
 
 @dataclass(slots=True)
 class PoseTracker:
-    """Wrapper around MediaPipe Pose that emits normalized landmarks."""
+    """Wrapper around MediaPipe Pose that emits the minimum upper-body landmarks."""
 
     config: TrackerConfig
     _cv2: Any | None = field(init=False, default=None)
@@ -31,6 +33,13 @@ class PoseTracker:
         """Construct the underlying MediaPipe pose tracker."""
         import mediapipe as mp
 
+        logger.info(
+            "Initializing pose tracker complexity=%s detection_threshold=%.2f "
+            "tracking_threshold=%.2f",
+            self.config.model_complexity,
+            self.config.min_detection_confidence,
+            self.config.min_tracking_confidence,
+        )
         self._pose = mp.solutions.pose.Pose(
             model_complexity=self.config.model_complexity,
             min_detection_confidence=self.config.min_detection_confidence,
@@ -47,23 +56,51 @@ class PoseTracker:
 
         rgb_frame = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
         result = self._pose.process(rgb_frame)
-        landmarks: dict[str, LandmarkPoint] = {}
-        if result.pose_landmarks is not None:
-            for name, index in _POSE_LANDMARKS.items():
-                landmark = result.pose_landmarks.landmark[index]
-                landmarks[name] = LandmarkPoint(
-                    x=landmark.x,
-                    y=landmark.y,
-                    z=landmark.z,
-                    visibility=landmark.visibility,
-                )
         frame_timestamp = (
             timestamp
             if isinstance(timestamp, FrameTimestamp)
             else FrameTimestamp(seconds=timestamp)
         )
-        return TrackerOutput(timestamp=frame_timestamp, landmarks=landmarks)
+
+        if result.pose_landmarks is None:
+            logger.debug(
+                "Tracking status=no_person_detected timestamp=%.3f",
+                frame_timestamp.seconds,
+            )
+            return TrackerOutput(
+                timestamp=frame_timestamp,
+                landmarks={},
+                person_detected=False,
+                status="no_person_detected",
+            )
+
+        landmarks: dict[str, LandmarkPoint] = {}
+        for name, index in _POSE_LANDMARKS.items():
+            landmark = result.pose_landmarks.landmark[index]
+            if landmark.visibility < self.config.min_tracking_confidence:
+                continue
+            landmarks[name] = LandmarkPoint(
+                x=landmark.x,
+                y=landmark.y,
+                z=landmark.z,
+                visibility=landmark.visibility,
+            )
+
+        status = "tracking" if landmarks else "landmarks_below_confidence_threshold"
+        logger.debug(
+            "Tracking status=%s timestamp=%.3f landmarks=%s",
+            status,
+            frame_timestamp.seconds,
+            sorted(landmarks),
+        )
+        return TrackerOutput(
+            timestamp=frame_timestamp,
+            landmarks=landmarks,
+            person_detected=True,
+            status=status,
+        )
 
     def close(self) -> None:
         """Close MediaPipe resources."""
+        logger.info("Closing pose tracker")
         self._pose.close()

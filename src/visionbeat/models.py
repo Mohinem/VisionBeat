@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
+
+try:
+    from enum import StrEnum
+except ImportError:  # pragma: no cover - Python < 3.11 fallback for local tooling.
+    class StrEnum(str, Enum):
+        """Compatibility shim for Python versions without enum.StrEnum."""
+
 from math import isfinite
 from typing import Any
 
@@ -212,9 +219,11 @@ class TrackerOutput:
     timestamp: FrameTimestamp
     landmarks: dict[str, LandmarkPoint] = field(default_factory=dict)
     candidates: tuple[DetectionCandidate, ...] = ()
+    person_detected: bool = False
+    status: str = "no_person_detected"
 
     def __post_init__(self) -> None:
-        """Normalize mapping values and ensure deterministic immutable candidates."""
+        """Normalize payload values and tracking-status metadata."""
         normalized_landmarks = {
             name: value if isinstance(value, LandmarkPoint) else LandmarkPoint.from_dict(value)
             for name, value in self.landmarks.items()
@@ -225,8 +234,12 @@ class TrackerOutput:
             else DetectionCandidate.from_dict(candidate)
             for candidate in self.candidates
         )
+        status = self.status.strip() or "unknown"
+        person_detected = bool(self.person_detected or normalized_landmarks)
         object.__setattr__(self, "landmarks", normalized_landmarks)
         object.__setattr__(self, "candidates", normalized_candidates)
+        object.__setattr__(self, "person_detected", person_detected)
+        object.__setattr__(self, "status", status)
 
     def get(self, name: str) -> LandmarkPoint | None:
         """Return a landmark by name if it is present in the frame."""
@@ -238,6 +251,8 @@ class TrackerOutput:
             "timestamp": self.timestamp.to_dict(),
             "landmarks": {name: point.to_dict() for name, point in self.landmarks.items()},
             "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "person_detected": self.person_detected,
+            "status": self.status,
         }
 
     @classmethod
@@ -253,6 +268,8 @@ class TrackerOutput:
                 DetectionCandidate.from_dict(candidate)
                 for candidate in payload.get("candidates", [])
             ),
+            person_detected=payload.get("person_detected", False),
+            status=payload.get("status", "no_person_detected"),
         )
 
 
