@@ -126,6 +126,10 @@ class GestureConfig:
     strike_max_depth_drift: float = 0.14
     min_velocity: float = 0.5
     cooldown_seconds: float = 0.18
+    analysis_window_seconds: float = 0.18
+    confirmation_window_seconds: float = 0.12
+    candidate_ratio: float = 0.7
+    axis_dominance_ratio: float = 1.5
     history_size: int = 6
     active_hand: str = "right"
 
@@ -138,11 +142,19 @@ class GestureConfig:
             "strike_max_depth_drift",
             "min_velocity",
             "cooldown_seconds",
+            "analysis_window_seconds",
+            "confirmation_window_seconds",
+            "candidate_ratio",
+            "axis_dominance_ratio",
         ):
             value = float(getattr(self, field_name))
             if value <= 0.0:
                 raise ValueError(f"{field_name} must be greater than zero.")
             object.__setattr__(self, field_name, value)
+        if self.candidate_ratio > 1.0:
+            raise ValueError("candidate_ratio must be less than or equal to 1.0.")
+        if self.axis_dominance_ratio < 1.0:
+            raise ValueError("axis_dominance_ratio must be greater than or equal to 1.0.")
         object.__setattr__(
             self,
             "history_size",
@@ -162,6 +174,10 @@ class GestureConfig:
             "strike_max_depth_drift": self.strike_max_depth_drift,
             "min_velocity": self.min_velocity,
             "cooldown_seconds": self.cooldown_seconds,
+            "analysis_window_seconds": self.analysis_window_seconds,
+            "confirmation_window_seconds": self.confirmation_window_seconds,
+            "candidate_ratio": self.candidate_ratio,
+            "axis_dominance_ratio": self.axis_dominance_ratio,
             "history_size": self.history_size,
             "active_hand": self.active_hand,
         }

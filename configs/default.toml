@@ -21,6 +21,10 @@ strike_down_delta_y = 0.22
 strike_max_depth_drift = 0.14
 min_velocity = 0.5
 cooldown_seconds = 0.18
+analysis_window_seconds = 0.18
+confirmation_window_seconds = 0.12
+candidate_ratio = 0.7
+axis_dominance_ratio = 1.5
 history_size = 6
 active_hand = "right"
 
