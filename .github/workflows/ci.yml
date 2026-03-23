@@ -22,7 +22,12 @@ jobs:
       - name: Install system packages for pygame/OpenCV
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1 libglib2.0-0 libasound2
+          alsa_package="libasound2"
+          alsa_candidate="$(apt-cache policy libasound2t64 | awk '/Candidate:/ {print $2}')"
+          if [ -n "$alsa_candidate" ] && [ "$alsa_candidate" != "(none)" ]; then
+            alsa_package="libasound2t64"
+          fi
+          sudo apt-get install -y libgl1 libglib2.0-0 "$alsa_package"
 
       - name: Install project and tooling
         run: |
