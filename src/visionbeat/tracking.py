@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from visionbeat.config import TrackerConfig
-from visionbeat.models import LandmarkPoint, PoseFrame
+from visionbeat.models import FrameTimestamp, LandmarkPoint, TrackerOutput
 
 Frame = Any
 _POSE_LANDMARKS: Final[dict[str, int]] = {
@@ -38,8 +38,8 @@ class PoseTracker:
             enable_segmentation=self.config.enable_segmentation,
         )
 
-    def process(self, frame: Frame, timestamp: float) -> PoseFrame:
-        """Extract a ``PoseFrame`` from a BGR webcam frame."""
+    def process(self, frame: Frame, timestamp: FrameTimestamp | float) -> TrackerOutput:
+        """Extract tracker output from a BGR webcam frame."""
         if self._cv2 is None:
             import cv2
 
@@ -57,7 +57,7 @@ class PoseTracker:
                     z=landmark.z,
                     visibility=landmark.visibility,
                 )
-        return PoseFrame(timestamp=timestamp, landmarks=landmarks)
+        return TrackerOutput(timestamp=timestamp, landmarks=landmarks)
 
     def close(self) -> None:
         """Close MediaPipe resources."""

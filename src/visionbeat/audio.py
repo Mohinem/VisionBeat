@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from visionbeat.config import AudioConfig
-from visionbeat.models import GestureType
+from visionbeat.models import AudioTrigger, GestureType
 
 
 @dataclass(slots=True)
@@ -49,9 +49,12 @@ class AudioEngine:
                 f"{missing_display}. Run `python scripts/generate_demo_samples.py` first."
             )
 
-    def trigger(self, gesture: GestureType) -> None:
-        """Play the sample assigned to a gesture."""
-        self._sounds[gesture].play()
+    def trigger(self, trigger: AudioTrigger | GestureType) -> None:
+        """Play the sample assigned to a gesture or fully-described trigger event."""
+        gesture = trigger.gesture if isinstance(trigger, AudioTrigger) else trigger
+        sound = self._sounds[gesture]
+        sound.set_volume(self.config.volume)
+        sound.play()
 
     def close(self) -> None:
         """Shutdown the mixer subsystem."""

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from visionbeat.config import GestureConfig
 from visionbeat.math_utils import l1_velocity
-from visionbeat.models import GestureEvent, GestureType, PoseFrame
+from visionbeat.models import GestureEvent, GestureType, TrackerOutput
 
 
 @dataclass(slots=True)
@@ -39,15 +39,17 @@ class GestureDetector:
             "right": HandHistory(deque(maxlen=config.history_size)),
         }
 
-    def update(self, frame: PoseFrame) -> list[GestureEvent]:
-        """Consume a pose frame and emit any newly detected gestures."""
+    def update(self, frame: TrackerOutput) -> list[GestureEvent]:
+        """Consume tracker output and emit any newly detected gestures."""
         events: list[GestureEvent] = []
         for hand in ("left", "right"):
             wrist = frame.get(f"{hand}_wrist")
             if wrist is None or wrist.visibility < 0.5:
                 continue
             history = self._histories[hand]
-            history.samples.append(MotionSample(frame.timestamp, wrist.x, wrist.y, wrist.z))
+            history.samples.append(
+                MotionSample(frame.timestamp.seconds, wrist.x, wrist.y, wrist.z)
+            )
             event = self._detect_for_hand(hand, history)
             if event is not None:
                 events.append(event)
