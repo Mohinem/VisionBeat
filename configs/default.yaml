@@ -51,3 +51,6 @@ debug:
 logging:
   level: INFO
   format: '%(asctime)s | %(levelname)s | %(name)s | %(message)s'
+  structured: true
+  event_log_path: null
+  event_log_format: jsonl

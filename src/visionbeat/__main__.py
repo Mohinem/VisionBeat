@@ -49,7 +49,11 @@ def main(argv: list[str] | None = None) -> None:
     """Initialize logging, load configuration, and start the application."""
     args = parse_args(argv)
     config = build_config(args.config, camera_index=args.camera_index)
-    configure_logging(config.logging.level, log_format=config.logging.format)
+    configure_logging(
+        config.logging.level,
+        log_format=config.logging.format,
+        structured=config.logging.structured,
+    )
     app = VisionBeatApp(config)
     app.run()
 

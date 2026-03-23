@@ -575,17 +575,28 @@ class DebugConfig:
 
 @dataclass(frozen=True, slots=True)
 class LoggingConfig:
-    """Process logging configuration."""
+    """Process logging and observability configuration."""
 
     level: str = "INFO"
     format: str = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    structured: bool = True
+    event_log_path: str | None = None
+    event_log_format: str = "jsonl"
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> LoggingConfig:
         """Build logging configuration from a validated mapping."""
         reader = _ConfigReader(payload, path="logging")
-        reader.reject_unknown_keys({"level", "format"})
+        reader.reject_unknown_keys(
+            {"level", "format", "structured", "event_log_path", "event_log_format"}
+        )
         level = reader.string("level", default="INFO", non_empty=True) or "INFO"
+        event_log_format = (
+            reader.string("event_log_format", default="jsonl", non_empty=True) or "jsonl"
+        ).lower()
+        if event_log_format not in {"jsonl", "csv"}:
+            raise ConfigError("logging.event_log_format: must be either 'jsonl' or 'csv'.")
+        event_log_path = reader.string("event_log_path", default=None)
         return cls(
             level=level.upper(),
             format=reader.string(
@@ -594,11 +605,20 @@ class LoggingConfig:
                 non_empty=True,
             )
             or "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            structured=reader.boolean("structured", default=True),
+            event_log_path=event_log_path or None,
+            event_log_format=event_log_format,
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the configuration into a dictionary."""
-        return {"level": self.level, "format": self.format}
+        return {
+            "level": self.level,
+            "format": self.format,
+            "structured": self.structured,
+            "event_log_path": self.event_log_path,
+            "event_log_format": self.event_log_format,
+        }
 
 
 @dataclass(frozen=True, slots=True)

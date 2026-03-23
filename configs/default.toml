@@ -51,3 +51,6 @@ show_debug_panel = true
 [logging]
 level = "INFO"
 format = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+structured = true
+event_log_path = ""
+event_log_format = "jsonl"
