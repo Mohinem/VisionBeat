@@ -114,6 +114,18 @@ class FakeOverlay:
         self.debug_enabled.append(enabled)
 
 
+class FakeTransport:
+    def __init__(self) -> None:
+        self.events: list[GestureEvent] = []
+        self.close_calls = 0
+
+    def emit(self, event: GestureEvent) -> None:
+        self.events.append(event)
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
 class FakePreview:
     def __init__(
         self,
@@ -208,6 +220,7 @@ def test_runtime_orchestrates_tracking_detection_audio_and_overlay() -> None:
         cooldowns=[0.08],
     )
     audio = FakeAudio()
+    transport = FakeTransport()
     overlay = FakeOverlay()
     preview = FakePreview([False])
     runtime = VisionBeatRuntime(
@@ -216,6 +229,7 @@ def test_runtime_orchestrates_tracking_detection_audio_and_overlay() -> None:
         tracker=tracker,
         detector=detector,
         audio=audio,
+        transport=transport,
         overlay=overlay,
         preview=preview,
     )
@@ -226,6 +240,7 @@ def test_runtime_orchestrates_tracking_detection_audio_and_overlay() -> None:
     assert tracker.process_calls[0][0] is frame
     assert detector.update_calls[0].status == "tracking"
     assert len(audio.triggers) == 1
+    assert transport.events == [event]
     assert audio.triggers[0].gesture is GestureType.KICK
     assert audio.triggers[0].intensity == pytest.approx(0.91)
     state = overlay.calls[0][1]
@@ -251,6 +266,7 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
     )
     audio = FakeAudio()
     overlay = FakeOverlay()
+    transport = FakeTransport()
     preview = FakePreview([False, True])
     recorder = FakeRecorder()
     runtime = VisionBeatRuntime(
@@ -259,6 +275,7 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
         tracker=tracker,
         detector=detector,
         audio=audio,
+        transport=transport,
         overlay=overlay,
         preview=preview,
         recorder=recorder,
@@ -274,6 +291,7 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
     assert camera.close_calls == 1
     assert tracker.close_calls == 1
     assert audio.close_calls == 1
+    assert transport.close_calls == 1
     assert preview.close_calls == 1
     assert len(overlay.calls) == 2
     assert overlay.calls[1][1].fps == pytest.approx(10.0)
