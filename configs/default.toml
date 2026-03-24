@@ -43,6 +43,12 @@ volume = 0.9
 kick = "assets/samples/kick.wav"
 snare = "assets/samples/snare.wav"
 
+[transport]
+backend = "none"
+host = "127.0.0.1"
+port = 9000
+source = "visionbeat"
+
 [debug.overlays]
 draw_landmarks = true
 draw_velocity_vectors = true

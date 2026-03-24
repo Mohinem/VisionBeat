@@ -16,6 +16,7 @@ from visionbeat.config import (
     GestureThresholdsConfig,
     LoggingConfig,
     OverlayConfig,
+    TransportConfig,
     TrackerConfig,
     _ConfigReader,
     _load_yaml_config,
@@ -118,6 +119,7 @@ event_log_format = "csv"
             {"sample_mapping": {"kick": "kick.wav", "snare": "snare.wav"}},
             AudioConfig,
         ),
+        (TransportConfig.from_mapping, {"backend": "udp", "port": 9100}, TransportConfig),
         (OverlayConfig.from_dict, {"draw_landmarks": False}, OverlayConfig),
         (DebugConfig.from_mapping, {"overlays": {"show_debug_panel": False}}, DebugConfig),
         (LoggingConfig.from_mapping, {"level": "debug"}, LoggingConfig),
@@ -215,6 +217,18 @@ def test_gesture_config_validation_errors(payload: dict[str, object], message: s
 def test_audio_config_validation_errors(payload: dict[str, object], message: str) -> None:
     with pytest.raises(ConfigError, match=re.escape(message)):
         AudioConfig.from_mapping(payload)
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"backend": "osc"}, "transport.backend: must be either 'none' or 'udp'."),
+        ({"port": 0}, "transport.port: must be greater than 0"),
+    ],
+)
+def test_transport_config_validation_errors(payload: dict[str, object], message: str) -> None:
+    with pytest.raises(ConfigError, match=re.escape(message)):
+        TransportConfig.from_mapping(payload)
 
 
 @pytest.mark.parametrize(

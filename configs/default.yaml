@@ -37,10 +37,16 @@ audio:
   output_channels: 2
   simultaneous_voices: 16
   output_device_name: null
+  volume: 0.9
   sample_mapping:
     kick: assets/samples/kick.wav
     snare: assets/samples/snare.wav
-  volume: 0.9
+
+transport:
+  backend: none
+  host: 127.0.0.1
+  port: 9000
+  source: visionbeat
 
 debug:
   overlays:

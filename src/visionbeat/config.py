@@ -514,6 +514,42 @@ class AudioConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TransportConfig:
+    """External gesture transport configuration for downstream audio engines."""
+
+    backend: str = "none"
+    host: str = "127.0.0.1"
+    port: int = 9000
+    source: str = "visionbeat"
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> TransportConfig:
+        """Build transport configuration from a validated mapping."""
+        reader = _ConfigReader(payload, path="transport")
+        reader.reject_unknown_keys({"backend", "host", "port", "source"})
+        backend = (reader.string("backend", default="none", non_empty=True) or "none").lower()
+        if backend not in {"none", "udp"}:
+            raise ConfigError("transport.backend: must be either 'none' or 'udp'.")
+        host = reader.string("host", default="127.0.0.1", non_empty=True) or "127.0.0.1"
+        source = reader.string("source", default="visionbeat", non_empty=True) or "visionbeat"
+        return cls(
+            backend=backend,
+            host=host,
+            port=reader.integer("port", default=9000, minimum=1),
+            source=source,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the transport configuration into a dictionary."""
+        return {
+            "backend": self.backend,
+            "host": self.host,
+            "port": self.port,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class OverlayConfig:
     """Options controlling the real-time debug overlay."""
 
@@ -629,6 +665,7 @@ class AppConfig:
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     gestures: GestureConfig = field(default_factory=GestureConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
+    transport: TransportConfig = field(default_factory=TransportConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -646,7 +683,9 @@ class AppConfig:
     def from_dict(cls, payload: Mapping[str, Any]) -> AppConfig:
         """Create an application configuration from a nested mapping."""
         reader = _ConfigReader(payload, path="")
-        reader.reject_unknown_keys({"camera", "tracker", "gestures", "audio", "debug", "logging"})
+        reader.reject_unknown_keys(
+            {"camera", "tracker", "gestures", "audio", "transport", "debug", "logging"}
+        )
         return cls(
             camera=CameraConfig.from_mapping(reader.child_mapping("camera", default={}).payload),
             tracker=TrackerConfig.from_mapping(reader.child_mapping("tracker", default={}).payload),
@@ -654,6 +693,9 @@ class AppConfig:
                 reader.child_mapping("gestures", default={}).payload
             ),
             audio=AudioConfig.from_mapping(reader.child_mapping("audio", default={}).payload),
+            transport=TransportConfig.from_mapping(
+                reader.child_mapping("transport", default={}).payload
+            ),
             debug=DebugConfig.from_mapping(reader.child_mapping("debug", default={}).payload),
             logging=LoggingConfig.from_mapping(reader.child_mapping("logging", default={}).payload),
         )
@@ -665,6 +707,7 @@ class AppConfig:
             "tracker": self.tracker.to_dict(),
             "gestures": self.gestures.to_dict(),
             "audio": self.audio.to_dict(),
+            "transport": self.transport.to_dict(),
             "debug": self.debug.to_dict(),
             "logging": self.logging.to_dict(),
         }

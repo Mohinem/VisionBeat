@@ -20,6 +20,11 @@ from visionbeat.models import (
 from visionbeat.observability import ObservabilityRecorder, build_observability_recorder
 from visionbeat.overlay import OverlayRenderer
 from visionbeat.tracking import PoseTracker
+from visionbeat.transport import (
+    GestureEventTransport,
+    NullGestureEventTransport,
+    UdpGestureEventTransport,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +96,7 @@ class VisionBeatRuntime:
     audio: AudioEngine
     overlay: OverlayRenderer
     preview: PreviewWindow
+    transport: GestureEventTransport = field(default_factory=NullGestureEventTransport)
     recorder: ObservabilityRecorder | None = None
     overlay_toggle_key: int = ord("o")
     debug_toggle_key: int = ord("d")
@@ -216,6 +222,7 @@ class VisionBeatRuntime:
                 intensity=event.confidence,
             )
         )
+        self.transport.emit(event)
 
     def close(self) -> None:
         """Release external resources owned by the runtime."""
@@ -225,6 +232,7 @@ class VisionBeatRuntime:
         self.camera.close()
         self.tracker.close()
         self.audio.close()
+        self.transport.close()
         self.preview.close()
         if self.recorder is not None:
             self.recorder.close()
@@ -242,6 +250,7 @@ class VisionBeatApp:
     detector: GestureDetector = field(init=False)
     recorder: ObservabilityRecorder = field(init=False)
     audio: AudioEngine = field(init=False)
+    transport: GestureEventTransport = field(init=False)
     overlay: OverlayRenderer = field(init=False)
     preview: PreviewWindow = field(init=False)
     runtime: VisionBeatRuntime = field(init=False)
@@ -257,6 +266,14 @@ class VisionBeatApp:
         self.tracker = PoseTracker(self.config.tracker)
         self.detector = GestureDetector(self.config.gestures, observer=self.recorder)
         self.audio = create_audio_engine(self.config.audio)
+        if self.config.transport.backend == "udp":
+            self.transport = UdpGestureEventTransport(
+                host=self.config.transport.host,
+                port=self.config.transport.port,
+                source=self.config.transport.source,
+            )
+        else:
+            self.transport = NullGestureEventTransport()
         self.overlay = OverlayRenderer(self.config.overlay)
         self.preview = OpenCVPreviewWindow()
         self.recorder.log_app_startup(
@@ -275,6 +292,7 @@ class VisionBeatApp:
             tracker=self.tracker,
             detector=self.detector,
             audio=self.audio,
+            transport=self.transport,
             overlay=self.overlay,
             preview=self.preview,
             recorder=self.recorder,
