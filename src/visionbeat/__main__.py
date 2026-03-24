@@ -96,12 +96,18 @@ def build_config(
         config = replace(
             config,
             logging=replace(config.logging, level="DEBUG"),
-            debug=replace(config.debug, overlays=replace(config.debug.overlays, show_debug_panel=True)),
+            debug=replace(
+                config.debug,
+                overlays=replace(config.debug.overlays, show_debug_panel=True),
+            ),
         )
     if no_debug:
         config = replace(
             config,
-            debug=replace(config.debug, overlays=replace(config.debug.overlays, show_debug_panel=False)),
+            debug=replace(
+                config.debug,
+                overlays=replace(config.debug.overlays, show_debug_panel=False),
+            ),
         )
     return _apply_sensitivity_preset(config, sensitivity)
 

@@ -100,7 +100,9 @@ class VisionBeatRuntime:
     def run(self) -> None:
         """Run the application until the preview window or frame source requests shutdown."""
         logger.info("Starting VisionBeat runtime loop")
-        self._overlays_enabled = self.config.overlay.draw_landmarks or self.config.overlay.show_debug_panel
+        self._overlays_enabled = (
+            self.config.overlay.draw_landmarks or self.config.overlay.show_debug_panel
+        )
         self._debug_enabled = self.config.overlay.show_debug_panel
         self.overlay.set_overlay_enabled(self._overlays_enabled)
         self.overlay.set_debug_enabled(self._debug_enabled)
