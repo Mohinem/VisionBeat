@@ -64,7 +64,7 @@ class OpenCVPreviewWindow:
 
     def poll_key(self) -> int | None:
         """Poll for keyboard input and return a normalized key code."""
-        pressed_key = self._cv2.waitKey(1)
+        pressed_key = int(self._cv2.waitKey(1))
         if pressed_key < 0:
             return None
         return pressed_key & 0xFF
