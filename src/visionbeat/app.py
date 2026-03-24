@@ -92,6 +92,8 @@ class VisionBeatRuntime:
     overlay: OverlayRenderer
     preview: PreviewWindow
     recorder: ObservabilityRecorder | None = None
+    overlay_toggle_key: int = ord("o")
+    debug_toggle_key: int = ord("d")
     _last_confirmed_gesture: GestureEvent | None = field(default=None, init=False)
     _last_frame_time: float | None = field(default=None, init=False)
     _overlays_enabled: bool = field(default=True, init=False)
@@ -163,7 +165,7 @@ class VisionBeatRuntime:
         """Handle interactive keyboard controls for overlay visibility."""
         if key_code is None:
             return
-        if key_code == ord("o"):
+        if key_code == self.overlay_toggle_key:
             self._overlays_enabled = not self._overlays_enabled
             self.overlay.set_overlay_enabled(self._overlays_enabled)
             logger.info(
@@ -171,7 +173,7 @@ class VisionBeatRuntime:
                 "on" if self._overlays_enabled else "off",
             )
             return
-        if key_code == ord("d"):
+        if key_code == self.debug_toggle_key:
             self._debug_enabled = not self._debug_enabled
             self.overlay.set_debug_enabled(self._debug_enabled)
             logger.info(
@@ -233,6 +235,8 @@ class VisionBeatApp:
     """Default dependency container for the VisionBeat runtime."""
 
     config: AppConfig
+    overlay_toggle_key: str = "o"
+    debug_toggle_key: str = "d"
     camera: CameraSource = field(init=False)
     tracker: PoseTracker = field(init=False)
     detector: GestureDetector = field(init=False)
@@ -244,6 +248,10 @@ class VisionBeatApp:
 
     def __post_init__(self) -> None:
         """Initialize runtime dependencies."""
+        if len(self.overlay_toggle_key) != 1:
+            raise ValueError("overlay_toggle_key must be a single character.")
+        if len(self.debug_toggle_key) != 1:
+            raise ValueError("debug_toggle_key must be a single character.")
         self.recorder = build_observability_recorder(self.config.logging)
         self.camera = CameraSource(self.config.camera, recorder=self.recorder)
         self.tracker = PoseTracker(self.config.tracker)
@@ -270,6 +278,8 @@ class VisionBeatApp:
             overlay=self.overlay,
             preview=self.preview,
             recorder=self.recorder,
+            overlay_toggle_key=ord(self.overlay_toggle_key.lower()),
+            debug_toggle_key=ord(self.debug_toggle_key.lower()),
         )
 
     def run(self) -> None:

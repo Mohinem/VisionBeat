@@ -127,7 +127,7 @@ def _build_debug_labels(state: RenderState) -> list[str]:
             if state.cooldown_remaining_seconds > 0.0
             else "ARMED COOLDOWN: READY"
         ),
-        "Shortcuts: [o] overlays  [d] debug  [q/esc] quit",
+        "Shortcuts: overlay toggle, debug toggle, q/esc quit",
     ]
     return labels
 

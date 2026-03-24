@@ -14,6 +14,8 @@ def test_parse_args_supports_default_run_mode() -> None:
     assert args.config == "configs/default.yaml"
     assert args.camera_index == 2
     assert args.sensitivity == "expressive"
+    assert args.overlay_toggle_key == "o"
+    assert args.debug_toggle_key == "d"
 
 
 def test_parse_args_supports_explicit_run_command() -> None:
@@ -51,13 +53,10 @@ def test_build_config_applies_debug_and_sensitivity_overrides(tmp_path: Path) ->
     assert config.gestures.thresholds.strike_down_delta_y > 0.26
 
 
-def test_build_config_rejects_conflicting_debug_flags(tmp_path: Path) -> None:
-    config_path = tmp_path / "visionbeat.yaml"
-    config_path.write_text("camera:\n  device_index: 0\n", encoding="utf-8")
-
+def test_parse_args_rejects_conflicting_debug_flags() -> None:
     try:
-        build_config(config_path.as_posix(), debug=True, no_debug=True)
-    except ValueError as exc:
-        assert "either --debug or --no-debug" in str(exc)
+        parse_args(["--debug", "--no-debug"])
+    except SystemExit as exc:
+        assert exc.code == 2
     else:
-        raise AssertionError("Expected ValueError for conflicting debug flags.")
+        raise AssertionError("Expected parse_args to reject conflicting debug flags.")

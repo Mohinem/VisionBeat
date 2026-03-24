@@ -34,12 +34,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Override the configured camera device index.",
     )
-    parser.add_argument(
+    debug_group = parser.add_mutually_exclusive_group()
+    debug_group.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug overlays and DEBUG log level.",
     )
-    parser.add_argument(
+    debug_group.add_argument(
         "--no-debug",
         action="store_true",
         help="Disable debug overlays.",
@@ -49,6 +50,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=("conservative", "balanced", "expressive"),
         default="balanced",
         help="Gesture sensitivity preset for live demos.",
+    )
+    parser.add_argument(
+        "--overlay-toggle-key",
+        default="o",
+        help="Single-character keyboard shortcut for toggling overlays (default: o).",
+    )
+    parser.add_argument(
+        "--debug-toggle-key",
+        default="d",
+        help="Single-character keyboard shortcut for toggling debug panel (default: d).",
     )
     return parser.parse_args(argv)
 
@@ -90,8 +101,6 @@ def build_config(
     config = load_config(Path(config_path))
     if camera_index is not None:
         config = replace(config, camera=replace(config.camera, device_index=camera_index))
-    if debug and no_debug:
-        raise ValueError("Choose either --debug or --no-debug, not both.")
     if debug:
         config = replace(
             config,
@@ -127,7 +136,11 @@ def main(argv: list[str] | None = None) -> None:
         log_format=config.logging.format,
         structured=config.logging.structured,
     )
-    app = VisionBeatApp(config)
+    app = VisionBeatApp(
+        config,
+        overlay_toggle_key=args.overlay_toggle_key,
+        debug_toggle_key=args.debug_toggle_key,
+    )
     app.run()
 
 
