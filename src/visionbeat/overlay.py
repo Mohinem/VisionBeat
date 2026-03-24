@@ -79,15 +79,25 @@ class OverlayRenderer:
         """Store overlay configuration and an optional OpenCV-compatible module."""
         self.config = config
         self._cv2 = cv2_module
+        self._overlay_enabled = config.draw_landmarks or config.show_debug_panel
+        self._debug_enabled = config.show_debug_panel
+
+    def set_overlay_enabled(self, enabled: bool) -> None:
+        """Enable or disable all overlay rendering."""
+        self._overlay_enabled = bool(enabled)
+
+    def set_debug_enabled(self, enabled: bool) -> None:
+        """Enable or disable debug-panel rendering."""
+        self._debug_enabled = bool(enabled)
 
     def render(self, frame: Frame, state: RenderState) -> Frame:
         """Render landmarks and runtime state onto a frame copy."""
         output = frame.copy()
 
-        if self.config.draw_landmarks:
+        if self._overlay_enabled and self.config.draw_landmarks:
             draw_pose_landmarks(output, state.pose, cv2_module=self._cv2)
 
-        if self.config.show_debug_panel:
+        if self._overlay_enabled and self._debug_enabled:
             draw_labels(output, _build_debug_labels(state), cv2_module=self._cv2)
 
         return output
@@ -96,26 +106,28 @@ class OverlayRenderer:
 def _build_debug_labels(state: RenderState) -> list[str]:
     """Build human-readable overlay lines from render state."""
     labels = [
-        f"VisionBeat ({state.pose.status})",
+        "VisionBeat • Research Demo HUD",
+        f"Status: {state.pose.status}",
         f"Frame: {state.frame_index}",
         f"FPS: {state.fps:.1f}" if state.fps is not None else "FPS: --",
         (
-            f"Candidate: {state.current_candidate.label} "
+            f"Detected motion: {state.current_candidate.label} "
             f"[{state.current_candidate.confidence:.2f}]"
         )
         if state.current_candidate is not None
-        else "Candidate: none",
+        else "Detected motion: none",
         (
-            f"Confirmed: {state.confirmed_gesture.label} "
+            f"Trigger: {state.confirmed_gesture.label} "
             f"[{state.confirmed_gesture.confidence:.2f}]"
         )
         if state.confirmed_gesture is not None
-        else "Confirmed: none",
+        else "Trigger: none",
         (
-            f"Cooldown: {state.cooldown_remaining_seconds:.2f}s"
+            f"ARMED COOLDOWN: {state.cooldown_remaining_seconds:.2f}s remaining"
             if state.cooldown_remaining_seconds > 0.0
-            else "Cooldown: ready"
+            else "ARMED COOLDOWN: READY"
         ),
+        "Shortcuts: overlay toggle, debug toggle, q/esc quit",
     ]
     return labels
 

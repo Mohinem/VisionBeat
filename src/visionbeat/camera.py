@@ -64,7 +64,11 @@ class CameraSource(CameraSourceProtocol):
                 )
             self._capture.release()
             self._capture = None
-            raise RuntimeError(f"Unable to open webcam device {self.config.device_index}.")
+            raise RuntimeError(
+                "Unable to open webcam device "
+                f"{self.config.device_index}. Check camera permissions, whether another app "
+                "is using the webcam, or try --camera-index with a different device."
+            )
         self._frame_index = 0
         if self.recorder is not None:
             self.recorder.log_camera_initialization(
@@ -89,7 +93,10 @@ class CameraSource(CameraSourceProtocol):
         success, frame = self._capture.read()
         if not success:
             logger.warning("Camera read failed for device %s", self.config.device_index)
-            raise RuntimeError("Failed to read frame from webcam.")
+            raise RuntimeError(
+                "Failed to read frame from webcam. Ensure the webcam remains connected and not "
+                "locked by another application."
+            )
 
         if self.config.mirror:
             assert self._cv2 is not None

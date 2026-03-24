@@ -100,22 +100,38 @@ class FakeAudio:
 class FakeOverlay:
     def __init__(self) -> None:
         self.calls: list[tuple[object, RenderState]] = []
+        self.overlay_enabled: list[bool] = []
+        self.debug_enabled: list[bool] = []
 
     def render(self, frame: object, state: RenderState) -> str:
         self.calls.append((frame, state))
         return f"rendered:{state.frame_index}"
 
+    def set_overlay_enabled(self, enabled: bool) -> None:
+        self.overlay_enabled.append(enabled)
+
+    def set_debug_enabled(self, enabled: bool) -> None:
+        self.debug_enabled.append(enabled)
+
 
 class FakePreview:
-    def __init__(self, should_close_sequence: list[bool]) -> None:
+    def __init__(
+        self,
+        should_close_sequence: list[bool],
+        key_sequence: list[int | None] | None = None,
+    ) -> None:
         self.should_close_sequence = list(should_close_sequence)
+        self.key_sequence = list(key_sequence or [None] * len(should_close_sequence))
         self.show_calls: list[tuple[str, object]] = []
         self.close_calls = 0
 
     def show(self, window_name: str, frame: object) -> None:
         self.show_calls.append((window_name, frame))
 
-    def should_close(self) -> bool:
+    def poll_key(self) -> int | None:
+        return self.key_sequence.pop(0)
+
+    def should_close(self, key_code: int | None = None) -> bool:
         return self.should_close_sequence.pop(0)
 
     def close(self) -> None:
@@ -261,6 +277,36 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
     assert preview.close_calls == 1
     assert len(overlay.calls) == 2
     assert overlay.calls[1][1].fps == pytest.approx(10.0)
+    assert overlay.overlay_enabled == [True]
+    assert overlay.debug_enabled == [True]
+
+
+def test_runtime_supports_overlay_toggle_shortcuts() -> None:
+    camera = FakeCamera(
+        [
+            CameraFrame(image=FakeFrame("frame-0"), captured_at=1.0, frame_index=0),
+            CameraFrame(image=FakeFrame("frame-1"), captured_at=1.1, frame_index=1),
+            CameraFrame(image=FakeFrame("frame-2"), captured_at=1.2, frame_index=2),
+        ]
+    )
+    runtime = VisionBeatRuntime(
+        config=AppConfig(),
+        camera=camera,
+        tracker=FakeTracker([make_pose(1.0), make_pose(1.1), make_pose(1.2)]),
+        detector=FakeDetector(
+            events_by_frame=[[], [], []],
+            candidates_by_frame=[(), (), ()],
+            cooldowns=[0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, True], key_sequence=[ord("o"), ord("d"), None]),
+    )
+
+    runtime.run()
+
+    assert runtime.overlay.overlay_enabled == [True, False]
+    assert runtime.overlay.debug_enabled == [True, False]
 
 
 def test_runtime_keeps_last_confirmed_gesture_visible_until_replaced() -> None:
@@ -426,3 +472,23 @@ def test_visionbeat_app_builds_runtime_from_default_dependency_factories(monkeyp
     assert created["detector"] == (app.config.gestures, recorder)
     assert created["overlay"] == app.config.overlay
     assert recorder.app_startups[0]["camera_resolution"] == "1280x720"
+    assert app.runtime.overlay_toggle_key == ord("o")
+    assert app.runtime.debug_toggle_key == ord("d")
+
+
+def test_visionbeat_app_accepts_custom_toggle_keys(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "visionbeat.app.build_observability_recorder",
+        lambda config: FakeRecorder(),
+    )
+    monkeypatch.setattr("visionbeat.app.CameraSource", lambda config, recorder=None: object())
+    monkeypatch.setattr("visionbeat.app.PoseTracker", lambda config: object())
+    monkeypatch.setattr("visionbeat.app.GestureDetector", lambda config, observer=None: object())
+    monkeypatch.setattr("visionbeat.app.create_audio_engine", lambda config: FakeAudio())
+    monkeypatch.setattr("visionbeat.app.OverlayRenderer", lambda config: FakeOverlay())
+    monkeypatch.setattr("visionbeat.app.OpenCVPreviewWindow", lambda: FakePreview([True]))
+
+    app = VisionBeatApp(AppConfig(), overlay_toggle_key="x", debug_toggle_key="z")
+
+    assert app.runtime.overlay_toggle_key == ord("x")
+    assert app.runtime.debug_toggle_key == ord("z")
