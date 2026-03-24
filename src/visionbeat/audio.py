@@ -105,7 +105,8 @@ class PygameAudioEngine(AudioEngine):
         for name, asset in self._assets.items():
             if not asset.exists:
                 logger.warning(
-                    "Audio sample '%s' is missing at %s. Playback for this sound is disabled.",
+                    "Audio sample '%s' is missing at %s. Playback for this sound is disabled. "
+                    "Generate demo samples with: python scripts/generate_demo_samples.py",
                     name,
                     asset.path,
                 )
@@ -143,7 +144,11 @@ class PygameAudioEngine(AudioEngine):
         """Trigger a named sample with optional intensity scaling."""
         sound = self._sounds.get(name.strip().lower())
         if sound is None:
-            logger.warning("Requested audio sample '%s' is unavailable.", name)
+            logger.warning(
+                "Requested audio sample '%s' is unavailable. "
+                "Check audio.sample_mapping paths and sample availability.",
+                name,
+            )
             return False
         normalized_intensity = max(0.0, min(float(intensity), 1.0))
         sound.set_volume(self.config.volume * normalized_intensity)

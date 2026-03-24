@@ -30,7 +30,10 @@ class PreviewWindow(Protocol):
     def show(self, window_name: str, frame: Any) -> None:
         """Display a rendered frame in the named preview window."""
 
-    def should_close(self) -> bool:
+    def poll_key(self) -> int | None:
+        """Return the most recent keyboard key code, if any."""
+
+    def should_close(self, key_code: int | None = None) -> bool:
         """Return whether the user requested the loop to stop."""
 
     def close(self) -> None:
@@ -59,10 +62,18 @@ class OpenCVPreviewWindow:
         """Show the provided frame in the configured OpenCV window."""
         self._cv2.imshow(window_name, frame)
 
-    def should_close(self) -> bool:
-        """Poll for keyboard input and return whether an exit key was pressed."""
-        pressed_key = self._cv2.waitKey(1) & 0xFF
-        return pressed_key in self.exit_keys
+    def poll_key(self) -> int | None:
+        """Poll for keyboard input and return a normalized key code."""
+        pressed_key = self._cv2.waitKey(1)
+        if pressed_key < 0:
+            return None
+        return pressed_key & 0xFF
+
+    def should_close(self, key_code: int | None = None) -> bool:
+        """Return whether an exit key was pressed."""
+        if key_code is None:
+            return False
+        return key_code in self.exit_keys
 
     def close(self) -> None:
         """Destroy any OpenCV preview windows."""
@@ -83,10 +94,16 @@ class VisionBeatRuntime:
     recorder: ObservabilityRecorder | None = None
     _last_confirmed_gesture: GestureEvent | None = field(default=None, init=False)
     _last_frame_time: float | None = field(default=None, init=False)
+    _overlays_enabled: bool = field(default=True, init=False)
+    _debug_enabled: bool = field(default=True, init=False)
 
     def run(self) -> None:
         """Run the application until the preview window or frame source requests shutdown."""
         logger.info("Starting VisionBeat runtime loop")
+        self._overlays_enabled = self.config.overlay.draw_landmarks or self.config.overlay.show_debug_panel
+        self._debug_enabled = self.config.overlay.show_debug_panel
+        self.overlay.set_overlay_enabled(self._overlays_enabled)
+        self.overlay.set_debug_enabled(self._debug_enabled)
         if self.recorder is not None:
             self.recorder.log_runtime_started(window_name=self.config.camera.window_name)
         self.camera.open()
@@ -131,12 +148,34 @@ class VisionBeatRuntime:
         rendered_frame = self.overlay.render(camera_frame.image, render_state)
         self.preview.show(self.config.camera.window_name, rendered_frame)
 
-        if self.preview.should_close():
+        key_code = self.preview.poll_key()
+        self._handle_key_command(key_code)
+        if self.preview.should_close(key_code):
             logger.info("Stopping VisionBeat runtime loop on user request")
             if self.recorder is not None:
                 self.recorder.log_runtime_stopped(reason="user_request")
             return False
         return True
+
+    def _handle_key_command(self, key_code: int | None) -> None:
+        """Handle interactive keyboard controls for overlay visibility."""
+        if key_code is None:
+            return
+        if key_code == ord("o"):
+            self._overlays_enabled = not self._overlays_enabled
+            self.overlay.set_overlay_enabled(self._overlays_enabled)
+            logger.info(
+                "Overlay visibility toggled to %s via keyboard shortcut",
+                "on" if self._overlays_enabled else "off",
+            )
+            return
+        if key_code == ord("d"):
+            self._debug_enabled = not self._debug_enabled
+            self.overlay.set_debug_enabled(self._debug_enabled)
+            logger.info(
+                "Debug panel toggled to %s via keyboard shortcut",
+                "on" if self._debug_enabled else "off",
+            )
 
     def _select_candidate(self) -> DetectionCandidate | None:
         """Return the highest-confidence active gesture candidate, if any."""
