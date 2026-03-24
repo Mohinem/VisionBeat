@@ -1,47 +1,31 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TypeAlias
 
 import pytest
 
+from tests.synthetic_motion import MotionPoint, MotionSequence, SyntheticMotionGenerator
 from visionbeat.models import FrameTimestamp, LandmarkPoint, TrackerOutput
-
-MotionPoint: TypeAlias = tuple[float, tuple[float, float, float]]
-MotionSequence: TypeAlias = tuple[MotionPoint, ...]
 
 
 @pytest.fixture
-def motion_sequences() -> dict[str, MotionSequence]:
+def synthetic_motion_generator() -> SyntheticMotionGenerator:
+    return SyntheticMotionGenerator(frame_interval=0.05, seed=11)
+
+
+@pytest.fixture
+def motion_sequences(
+    synthetic_motion_generator: SyntheticMotionGenerator,
+) -> dict[str, MotionSequence]:
     return {
-        "stationary": (
-            (0.00, (0.50, 0.40, -0.10)),
-            (0.05, (0.50, 0.40, -0.10)),
-            (0.10, (0.50, 0.40, -0.10)),
-            (0.15, (0.50, 0.40, -0.10)),
-        ),
-        "forward_punch": (
-            (0.00, (0.50, 0.40, -0.08)),
-            (0.05, (0.51, 0.42, -0.22)),
-            (0.10, (0.52, 0.43, -0.33)),
-        ),
-        "downward_strike": (
-            (0.00, (0.55, 0.20, -0.05)),
-            (0.05, (0.56, 0.36, -0.06)),
-            (0.10, (0.57, 0.45, -0.07)),
-        ),
-        "noisy_movement": (
-            (0.00, (0.50, 0.30, -0.10)),
-            (0.03, (0.58, 0.36, -0.18)),
-            (0.06, (0.46, 0.25, -0.07)),
-            (0.09, (0.59, 0.40, -0.21)),
-            (0.12, (0.48, 0.31, -0.12)),
-            (0.15, (0.60, 0.43, -0.19)),
-        ),
-        "borderline_threshold_movement": (
-            (0.00, (0.50, 0.40, -0.10)),
-            (0.05, (0.50, 0.40, -0.226)),
-            (0.10, (0.50, 0.40, -0.280)),
+        "stationary": synthetic_motion_generator.stationary_hand(duration=0.15),
+        "forward_punch": synthetic_motion_generator.forward_punch(duration=0.10, velocity=2.5),
+        "downward_strike": synthetic_motion_generator.downward_strike(duration=0.10, velocity=2.5),
+        "noisy_movement": synthetic_motion_generator.jitter_noise(duration=0.15, noise=0.06),
+        "borderline_threshold_movement": synthetic_motion_generator.forward_punch(
+            duration=0.10,
+            velocity=1.8,
+            noise=0.0,
         ),
     }
 
