@@ -214,6 +214,14 @@ For the full test strategy, markers, and hardware caveats, see [`docs/testing.md
 - Raise the camera so the arm motion stays visible during downward strikes.
 - Consider increasing `tracker.min_detection_confidence` and `tracker.min_tracking_confidence` only if your setup is otherwise stable.
 
+### Startup fails with "Unable to locate MediaPipe Pose API"
+
+- VisionBeat first tries the classic `mediapipe.solutions.pose.Pose` API.
+- If that API is unavailable, VisionBeat automatically tries MediaPipe Tasks Pose Landmarker.
+- Install at least `mediapipe>=0.10.14` and keep `opencv-python` up to date.
+- Confirm you are in a Python 3.11+ environment (`python --version`).
+- If installation still fails on Linux, check whether your CPU architecture has an official MediaPipe wheel.
+
 ### Audio does not play
 
 - Regenerate samples with `python scripts/generate_demo_samples.py`.
