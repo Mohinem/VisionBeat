@@ -146,6 +146,30 @@ def test_pose_tracker_uses_python_solutions_when_top_level_solutions_missing(
     assert fake_pose.closed is True
 
 
+def test_pose_tracker_imports_pose_module_when_solutions_namespace_lacks_pose(
+    monkeypatch,
+) -> None:
+    fake_pose = FakePose()
+    fake_cv2 = FakeCV2(FakeCapture([]))
+    fake_mp = SimpleNamespace(solutions=SimpleNamespace())
+    fake_pose_module = SimpleNamespace(Pose=lambda **_: fake_pose)
+
+    monkeypatch.setitem(sys.modules, "mediapipe", fake_mp)
+    monkeypatch.setitem(sys.modules, "mediapipe.solutions.pose", fake_pose_module)
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+
+    tracker = PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
+    output = tracker.process("frame-bgr", FrameTimestamp(seconds=2.0))
+    tracker.close()
+
+    assert output.status == "tracking"
+    assert output.person_detected is True
+    assert set(output.landmarks) == {"left_wrist"}
+    assert fake_cv2.cvt_calls == [("frame-bgr", fake_cv2.COLOR_BGR2RGB)]
+    assert fake_pose.received_frames == [("rgb", "frame-bgr", fake_cv2.COLOR_BGR2RGB)]
+    assert fake_pose.closed is True
+
+
 def test_pose_tracker_raises_clear_error_when_pose_api_missing(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "mediapipe", SimpleNamespace())
     monkeypatch.delitem(sys.modules, "mediapipe.python", raising=False)

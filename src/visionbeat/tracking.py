@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from importlib import import_module
 from typing import Any, Final
 
 from visionbeat.config import TrackerConfig
@@ -32,31 +33,31 @@ class PoseTracker:
     @staticmethod
     def _load_pose_factory() -> Any:
         """Load the MediaPipe pose factory across supported package layouts."""
-        import mediapipe as mp
+        for namespace_path in ("mediapipe", "mediapipe.python"):
+            try:
+                namespace = import_module(namespace_path)
+            except ImportError:
+                continue
+            solutions = getattr(namespace, "solutions", None)
+            pose_namespace = getattr(solutions, "pose", None) if solutions is not None else None
+            pose_factory = getattr(pose_namespace, "Pose", None)
+            if pose_factory is not None:
+                return pose_factory
 
-        solutions = getattr(mp, "solutions", None)
-        if solutions is not None and hasattr(solutions, "pose"):
-            return solutions.pose.Pose
+        for module_path in ("mediapipe.solutions.pose", "mediapipe.python.solutions.pose"):
+            try:
+                pose_module = import_module(module_path)
+            except ImportError:
+                continue
+            pose_factory = getattr(pose_module, "Pose", None)
+            if pose_factory is not None:
+                return pose_factory
 
-        # Some wheels expose solutions only via `mediapipe.solutions`.
-        try:
-            from mediapipe import solutions as top_level_solutions
-        except ImportError:
-            top_level_solutions = None
-        if top_level_solutions is not None and hasattr(top_level_solutions, "pose"):
-            return top_level_solutions.pose.Pose
-
-        # MediaPipe wheels may expose solutions via `mediapipe.python.solutions`.
-        try:
-            from mediapipe.python import solutions as python_solutions
-        except ImportError as exc:
-            msg = (
-                "Unable to locate MediaPipe Pose API. Expected one of "
-                "`mediapipe.solutions.pose` or `mediapipe.python.solutions.pose`."
-            )
-            raise RuntimeError(msg) from exc
-
-        return python_solutions.pose.Pose
+        msg = (
+            "Unable to locate MediaPipe Pose API. Expected one of "
+            "`mediapipe.solutions.pose` or `mediapipe.python.solutions.pose`."
+        )
+        raise RuntimeError(msg)
 
     def __post_init__(self) -> None:
         """Construct the underlying MediaPipe pose tracker."""
