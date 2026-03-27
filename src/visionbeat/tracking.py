@@ -59,17 +59,25 @@ class PoseTracker:
                 import_failures.append(f"{module_path}: {exc}")
                 continue
 
-            pose_module = getattr(module, "pose", None) if module_path.endswith("solutions") else module
+            if module_path.endswith("solutions"):
+                pose_module = getattr(module, "pose", None)
+            else:
+                pose_module = module
             pose_factory = getattr(pose_module, "Pose", None) if pose_module is not None else None
             if pose_factory is not None:
                 return pose_factory
 
-        failure_lines = "\n".join(f"- {failure}" for failure in import_failures) or "- no import errors captured"
+        failure_lines = (
+            "\n".join(f"- {failure}" for failure in import_failures)
+            or "- no import errors captured"
+        )
         msg = (
             "Unable to locate MediaPipe Pose API. VisionBeat requires the classic "
             "`mediapipe.solutions.pose.Pose` interface.\n"
-            "Install a compatible build with: `python -m pip install \"mediapipe>=0.10.14,<0.11\"`.\n"
-            "If you are on Linux, also verify Python 3.11+ and a wheel-supported CPU architecture.\n"
+            "Install a compatible build with: "
+            "`python -m pip install \"mediapipe>=0.10.14,<0.11\"`.\n"
+            "If you are on Linux, also verify Python 3.11+ "
+            "and a wheel-supported CPU architecture.\n"
             f"Import attempts:\n{failure_lines}"
         )
         raise RuntimeError(msg)
