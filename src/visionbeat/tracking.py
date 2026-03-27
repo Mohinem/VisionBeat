@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from importlib import import_module
+from types import SimpleNamespace
 from typing import Any, Final
 
 from visionbeat.config import TrackerConfig
@@ -68,7 +69,16 @@ class PoseTracker:
             self.config.min_detection_confidence,
             self.config.min_tracking_confidence,
         )
-        pose_factory = self._load_pose_factory()
+        try:
+            pose_factory = self._load_pose_factory()
+        except RuntimeError:
+            logger.warning(
+                "MediaPipe Pose API is unavailable; tracker will return "
+                "no_person_detected until a compatible MediaPipe package is installed.",
+            )
+            self._pose = _UnavailablePose()
+            return
+
         self._pose = pose_factory(
             model_complexity=self.config.model_complexity,
             min_detection_confidence=self.config.min_detection_confidence,
@@ -133,3 +143,13 @@ class PoseTracker:
         """Close MediaPipe resources."""
         logger.info("Closing pose tracker")
         self._pose.close()
+
+
+class _UnavailablePose:
+    """No-op pose implementation used when MediaPipe Pose is unavailable."""
+
+    def process(self, _: Frame) -> object:
+        return SimpleNamespace(pose_landmarks=None)
+
+    def close(self) -> None:
+        return None
