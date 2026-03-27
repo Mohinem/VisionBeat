@@ -29,10 +29,22 @@ class PoseTracker:
     _cv2: Any | None = field(init=False, default=None)
     _pose: Any = field(init=False)
 
-    def __post_init__(self) -> None:
-        """Construct the underlying MediaPipe pose tracker."""
+    @staticmethod
+    def _load_pose_factory() -> Any:
+        """Load the MediaPipe pose factory across supported package layouts."""
         import mediapipe as mp
 
+        solutions = getattr(mp, "solutions", None)
+        if solutions is not None and hasattr(solutions, "pose"):
+            return solutions.pose.Pose
+
+        # MediaPipe wheels may expose solutions via `mediapipe.python.solutions`.
+        from mediapipe.python import solutions as python_solutions
+
+        return python_solutions.pose.Pose
+
+    def __post_init__(self) -> None:
+        """Construct the underlying MediaPipe pose tracker."""
         logger.info(
             "Initializing pose tracker complexity=%s detection_threshold=%.2f "
             "tracking_threshold=%.2f",
@@ -40,7 +52,8 @@ class PoseTracker:
             self.config.min_detection_confidence,
             self.config.min_tracking_confidence,
         )
-        self._pose = mp.solutions.pose.Pose(
+        pose_factory = self._load_pose_factory()
+        self._pose = pose_factory(
             model_complexity=self.config.model_complexity,
             min_detection_confidence=self.config.min_detection_confidence,
             min_tracking_confidence=self.config.min_tracking_confidence,
