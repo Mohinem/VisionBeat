@@ -79,5 +79,5 @@ mypy_path = ["src"]
 packages = ["visionbeat"]
 
 [[tool.mypy.overrides]]
-module = ["cv2", "mediapipe", "pygame", "numpy", "numpy.typing"]
+module = ["cv2", "mediapipe", "mediapipe.python", "pygame", "numpy", "numpy.typing"]
 ignore_missing_imports = true
