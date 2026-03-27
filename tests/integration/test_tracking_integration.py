@@ -127,7 +127,11 @@ def test_pose_tracker_uses_python_solutions_when_top_level_solutions_missing(
     )
 
     monkeypatch.setitem(sys.modules, "mediapipe", fake_mp)
-    monkeypatch.setitem(sys.modules, "mediapipe.python", SimpleNamespace(solutions=fake_python_solutions))
+    monkeypatch.setitem(
+        sys.modules,
+        "mediapipe.python",
+        SimpleNamespace(solutions=fake_python_solutions),
+    )
     monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
 
     tracker = PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
