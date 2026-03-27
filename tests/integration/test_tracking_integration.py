@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -173,9 +174,66 @@ def test_pose_tracker_imports_pose_module_when_solutions_namespace_lacks_pose(
 def test_pose_tracker_raises_clear_error_when_pose_api_missing(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "mediapipe", SimpleNamespace())
     monkeypatch.delitem(sys.modules, "mediapipe.python", raising=False)
+    monkeypatch.delitem(sys.modules, "mediapipe.tasks.python", raising=False)
+    monkeypatch.delitem(sys.modules, "mediapipe.tasks.python.vision", raising=False)
 
     with pytest.raises(RuntimeError, match="mediapipe>=0.10.14,<0.11"):
         PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
+
+
+def test_pose_tracker_uses_tasks_pose_landmarker_when_solutions_pose_is_unavailable(
+    monkeypatch,
+) -> None:
+    fake_cv2 = FakeCV2(FakeCapture([]))
+    fake_mp = SimpleNamespace(
+        Image=lambda **kwargs: SimpleNamespace(**kwargs),
+        ImageFormat=SimpleNamespace(SRGB="srgb"),
+    )
+
+    class FakePoseLandmarker:
+        @staticmethod
+        def create_from_options(_: object) -> object:
+            landmarks = [
+                SimpleNamespace(x=0.0, y=0.0, z=0.0, visibility=0.1)
+                for _ in range(33)
+            ]
+            landmarks[15] = SimpleNamespace(x=0.4, y=0.5, z=-0.3, visibility=0.95)
+
+            class _Detector:
+                def detect(self, __: object) -> object:
+                    return SimpleNamespace(pose_landmarks=[landmarks])
+
+                def close(self) -> None:
+                    return None
+
+            return _Detector()
+
+    fake_vision = SimpleNamespace(
+        PoseLandmarker=FakePoseLandmarker,
+        PoseLandmarkerOptions=lambda **kwargs: SimpleNamespace(**kwargs),
+        RunningMode=SimpleNamespace(IMAGE="image"),
+    )
+    fake_tasks_python = SimpleNamespace(
+        BaseOptions=lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+
+    monkeypatch.setattr(
+        PoseTracker,
+        "_ensure_pose_model_asset",
+        staticmethod(lambda: Path("/tmp/pose_landmarker_lite.task")),
+    )
+    monkeypatch.setitem(sys.modules, "mediapipe", fake_mp)
+    monkeypatch.setitem(sys.modules, "mediapipe.tasks.python", fake_tasks_python)
+    monkeypatch.setitem(sys.modules, "mediapipe.tasks.python.vision", fake_vision)
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+
+    tracker = PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
+    output = tracker.process("frame-bgr", FrameTimestamp(seconds=4.0))
+    tracker.close()
+
+    assert output.status == "tracking"
+    assert output.person_detected is True
+    assert set(output.landmarks) == {"left_wrist"}
 
 
 @pytest.mark.webcam
