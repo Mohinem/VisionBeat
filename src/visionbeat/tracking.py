@@ -33,11 +33,16 @@ class PoseTracker:
     @staticmethod
     def _load_pose_factory() -> Any:
         """Load the MediaPipe pose factory across supported package layouts."""
-        import mediapipe as mp
-
-        solutions = getattr(mp, "solutions", None)
-        if solutions is not None and hasattr(solutions, "pose"):
-            return solutions.pose.Pose
+        for namespace_path in ("mediapipe", "mediapipe.python"):
+            try:
+                namespace = import_module(namespace_path)
+            except ImportError:
+                continue
+            solutions = getattr(namespace, "solutions", None)
+            pose_namespace = getattr(solutions, "pose", None) if solutions is not None else None
+            pose_factory = getattr(pose_namespace, "Pose", None)
+            if pose_factory is not None:
+                return pose_factory
 
         for module_path in ("mediapipe.solutions.pose", "mediapipe.python.solutions.pose"):
             try:
