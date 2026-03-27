@@ -170,19 +170,12 @@ def test_pose_tracker_imports_pose_module_when_solutions_namespace_lacks_pose(
     assert fake_pose.closed is True
 
 
-def test_pose_tracker_falls_back_to_noop_when_pose_api_missing(monkeypatch) -> None:
+def test_pose_tracker_raises_clear_error_when_pose_api_missing(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "mediapipe", SimpleNamespace())
     monkeypatch.delitem(sys.modules, "mediapipe.python", raising=False)
-    fake_cv2 = FakeCV2(FakeCapture([]))
-    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
 
-    tracker = PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
-    output = tracker.process("frame-bgr", FrameTimestamp(seconds=3.0))
-    tracker.close()
-
-    assert output.status == "no_person_detected"
-    assert output.person_detected is False
-    assert output.landmarks == {}
+    with pytest.raises(RuntimeError, match="mediapipe>=0.10.14,<0.11"):
+        PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
 
 
 @pytest.mark.webcam

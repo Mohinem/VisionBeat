@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from importlib import import_module
-from types import SimpleNamespace
 from typing import Any, Final
 
 from visionbeat.config import TrackerConfig
@@ -34,10 +33,13 @@ class PoseTracker:
     @staticmethod
     def _load_pose_factory() -> Any:
         """Load the MediaPipe pose factory across supported package layouts."""
+        import_failures: list[str] = []
+
         for namespace_path in ("mediapipe", "mediapipe.python"):
             try:
                 namespace = import_module(namespace_path)
-            except ImportError:
+            except ImportError as exc:
+                import_failures.append(f"{namespace_path}: {exc}")
                 continue
             solutions = getattr(namespace, "solutions", None)
             pose_namespace = getattr(solutions, "pose", None) if solutions is not None else None
@@ -45,18 +47,30 @@ class PoseTracker:
             if pose_factory is not None:
                 return pose_factory
 
-        for module_path in ("mediapipe.solutions.pose", "mediapipe.python.solutions.pose"):
+        for module_path in (
+            "mediapipe.solutions.pose",
+            "mediapipe.python.solutions.pose",
+            "mediapipe.solutions",
+            "mediapipe.python.solutions",
+        ):
             try:
-                pose_module = import_module(module_path)
-            except ImportError:
+                module = import_module(module_path)
+            except ImportError as exc:
+                import_failures.append(f"{module_path}: {exc}")
                 continue
-            pose_factory = getattr(pose_module, "Pose", None)
+
+            pose_module = getattr(module, "pose", None) if module_path.endswith("solutions") else module
+            pose_factory = getattr(pose_module, "Pose", None) if pose_module is not None else None
             if pose_factory is not None:
                 return pose_factory
 
+        failure_lines = "\n".join(f"- {failure}" for failure in import_failures) or "- no import errors captured"
         msg = (
-            "Unable to locate MediaPipe Pose API. Expected one of "
-            "`mediapipe.solutions.pose` or `mediapipe.python.solutions.pose`."
+            "Unable to locate MediaPipe Pose API. VisionBeat requires the classic "
+            "`mediapipe.solutions.pose.Pose` interface.\n"
+            "Install a compatible build with: `python -m pip install \"mediapipe>=0.10.14,<0.11\"`.\n"
+            "If you are on Linux, also verify Python 3.11+ and a wheel-supported CPU architecture.\n"
+            f"Import attempts:\n{failure_lines}"
         )
         raise RuntimeError(msg)
 
@@ -69,16 +83,7 @@ class PoseTracker:
             self.config.min_detection_confidence,
             self.config.min_tracking_confidence,
         )
-        try:
-            pose_factory = self._load_pose_factory()
-        except RuntimeError:
-            logger.warning(
-                "MediaPipe Pose API is unavailable; tracker will return "
-                "no_person_detected until a compatible MediaPipe package is installed.",
-            )
-            self._pose = _UnavailablePose()
-            return
-
+        pose_factory = self._load_pose_factory()
         self._pose = pose_factory(
             model_complexity=self.config.model_complexity,
             min_detection_confidence=self.config.min_detection_confidence,
@@ -143,13 +148,3 @@ class PoseTracker:
         """Close MediaPipe resources."""
         logger.info("Closing pose tracker")
         self._pose.close()
-
-
-class _UnavailablePose:
-    """No-op pose implementation used when MediaPipe Pose is unavailable."""
-
-    def process(self, _: Frame) -> object:
-        return SimpleNamespace(pose_landmarks=None)
-
-    def close(self) -> None:
-        return None
