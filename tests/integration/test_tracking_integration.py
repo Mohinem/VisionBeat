@@ -174,7 +174,7 @@ def test_pose_tracker_raises_clear_error_when_pose_api_missing(monkeypatch) -> N
     monkeypatch.setitem(sys.modules, "mediapipe", SimpleNamespace())
     monkeypatch.delitem(sys.modules, "mediapipe.python", raising=False)
 
-    with pytest.raises(RuntimeError, match="Unable to locate MediaPipe Pose API"):
+    with pytest.raises(RuntimeError, match="mediapipe>=0.10.14,<0.11"):
         PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
 
 

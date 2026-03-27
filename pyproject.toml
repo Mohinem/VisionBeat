@@ -21,7 +21,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Image Recognition",
 ]
 dependencies = [
-  "mediapipe>=0.10.14",
+  "mediapipe>=0.10.14,<0.11",
   "numpy>=1.26",
   "opencv-python>=4.10.0",
   "pygame>=2.5.2",
