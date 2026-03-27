@@ -114,6 +114,34 @@ def test_pose_tracker_scaffolding_exercises_mediapipe_and_cv2_paths(monkeypatch)
     assert fake_pose.closed is True
 
 
+def test_pose_tracker_uses_python_solutions_when_top_level_solutions_missing(
+    monkeypatch,
+) -> None:
+    fake_pose = FakePose()
+    fake_cv2 = FakeCV2(FakeCapture([]))
+    fake_mp = SimpleNamespace()
+    fake_python_solutions = SimpleNamespace(
+        pose=SimpleNamespace(
+            Pose=lambda **_: fake_pose,
+        )
+    )
+
+    monkeypatch.setitem(sys.modules, "mediapipe", fake_mp)
+    monkeypatch.setitem(sys.modules, "mediapipe.python", SimpleNamespace(solutions=fake_python_solutions))
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+
+    tracker = PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
+    output = tracker.process("frame-bgr", FrameTimestamp(seconds=2.0))
+    tracker.close()
+
+    assert output.status == "tracking"
+    assert output.person_detected is True
+    assert set(output.landmarks) == {"left_wrist"}
+    assert fake_cv2.cvt_calls == [("frame-bgr", fake_cv2.COLOR_BGR2RGB)]
+    assert fake_pose.received_frames == [("rgb", "frame-bgr", fake_cv2.COLOR_BGR2RGB)]
+    assert fake_pose.closed is True
+
+
 @pytest.mark.webcam
 def test_default_webcam_can_capture_frame() -> None:
     pytest.importorskip("cv2", exc_type=ImportError)
