@@ -76,21 +76,15 @@ class PoseTracker:
             if pose_factory is not None:
                 return pose_factory
 
-        tasks_pose_factory = PoseTracker._load_tasks_pose_factory(import_failures)
-        if tasks_pose_factory is not None:
-            return tasks_pose_factory
-
         failure_lines = (
             "\n".join(f"- {failure}" for failure in import_failures)
             or "- no import errors captured"
         )
         msg = (
             "Unable to locate MediaPipe Pose API. VisionBeat requires the classic "
-            "`mediapipe.solutions.pose.Pose` interface or the MediaPipe Tasks "
-            "Pose Landmarker API.\n"
-            "Install a compatible build with either:\n"
-            "- `python -m pip install \"mediapipe>=0.10.14,<0.11\"`\n"
-            "- `python -m pip install \"mediapipe>=0.10.14\"`\n"
+            "`mediapipe.solutions.pose.Pose` interface.\n"
+            "Install a compatible build with: "
+            "`python -m pip install \"mediapipe>=0.10.14,<0.11\"`.\n"
             "If you are on Linux, also verify Python 3.11+ "
             "and a wheel-supported CPU architecture.\n"
             f"Import attempts:\n{failure_lines}"
