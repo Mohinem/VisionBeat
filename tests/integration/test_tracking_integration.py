@@ -146,6 +146,14 @@ def test_pose_tracker_uses_python_solutions_when_top_level_solutions_missing(
     assert fake_pose.closed is True
 
 
+def test_pose_tracker_raises_clear_error_when_pose_api_missing(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "mediapipe", SimpleNamespace())
+    monkeypatch.delitem(sys.modules, "mediapipe.python", raising=False)
+
+    with pytest.raises(RuntimeError, match="Unable to locate MediaPipe Pose API"):
+        PoseTracker(TrackerConfig(min_tracking_confidence=0.5))
+
+
 @pytest.mark.webcam
 def test_default_webcam_can_capture_frame() -> None:
     pytest.importorskip("cv2", exc_type=ImportError)
