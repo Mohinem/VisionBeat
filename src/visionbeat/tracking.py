@@ -38,8 +38,23 @@ class PoseTracker:
         if solutions is not None and hasattr(solutions, "pose"):
             return solutions.pose.Pose
 
+        # Some wheels expose solutions only via `mediapipe.solutions`.
+        try:
+            from mediapipe import solutions as top_level_solutions
+        except ImportError:
+            top_level_solutions = None
+        if top_level_solutions is not None and hasattr(top_level_solutions, "pose"):
+            return top_level_solutions.pose.Pose
+
         # MediaPipe wheels may expose solutions via `mediapipe.python.solutions`.
-        from mediapipe.python import solutions as python_solutions
+        try:
+            from mediapipe.python import solutions as python_solutions
+        except ImportError as exc:
+            msg = (
+                "Unable to locate MediaPipe Pose API. Expected one of "
+                "`mediapipe.solutions.pose` or `mediapipe.python.solutions.pose`."
+            )
+            raise RuntimeError(msg) from exc
 
         return python_solutions.pose.Pose
 
