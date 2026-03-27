@@ -40,10 +40,8 @@ class PoseTracker:
     _pose: Any = field(init=False)
 
     @staticmethod
-    def _load_pose_factory() -> Any:
+    def _try_load_pose_factory(import_failures: list[str]) -> Any | None:
         """Load the MediaPipe pose factory across supported package layouts."""
-        import_failures: list[str] = []
-
         for namespace_path in ("mediapipe", "mediapipe.python"):
             try:
                 namespace = import_module(namespace_path)
@@ -75,6 +73,16 @@ class PoseTracker:
             pose_factory = getattr(pose_module, "Pose", None) if pose_module is not None else None
             if pose_factory is not None:
                 return pose_factory
+
+        return None
+
+    @staticmethod
+    def _load_pose_factory() -> Any:
+        """Load the MediaPipe pose factory across supported package layouts."""
+        import_failures: list[str] = []
+        pose_factory = PoseTracker._try_load_pose_factory(import_failures)
+        if pose_factory is not None:
+            return pose_factory
 
         failure_lines = (
             "\n".join(f"- {failure}" for failure in import_failures)
@@ -175,7 +183,25 @@ class PoseTracker:
             self.config.min_detection_confidence,
             self.config.min_tracking_confidence,
         )
-        pose_factory = self._load_pose_factory()
+        import_failures: list[str] = []
+        pose_factory = self._try_load_pose_factory(import_failures)
+        if pose_factory is None:
+            pose_factory = self._load_tasks_pose_factory(import_failures)
+        if pose_factory is None:
+            failure_lines = (
+                "\n".join(f"- {failure}" for failure in import_failures)
+                or "- no import errors captured"
+            )
+            msg = (
+                "Unable to locate MediaPipe Pose API. VisionBeat requires the classic "
+                "`mediapipe.solutions.pose.Pose` interface.\n"
+                "Install a compatible build with: "
+                "`python -m pip install \"mediapipe>=0.10.14,<0.11\"`.\n"
+                "If you are on Linux, also verify Python 3.11+ "
+                "and a wheel-supported CPU architecture.\n"
+                f"Import attempts:\n{failure_lines}"
+            )
+            raise RuntimeError(msg)
         self._pose = pose_factory(
             model_complexity=self.config.model_complexity,
             min_detection_confidence=self.config.min_detection_confidence,
