@@ -216,9 +216,8 @@ For the full test strategy, markers, and hardware caveats, see [`docs/testing.md
 
 ### Startup fails with "Unable to locate MediaPipe Pose API"
 
-- VisionBeat first tries the classic `mediapipe.solutions.pose.Pose` API.
-- If that API is unavailable, VisionBeat automatically tries MediaPipe Tasks Pose Landmarker.
-- Install at least `mediapipe>=0.10.14` and keep `opencv-python` up to date.
+- VisionBeat depends on the classic `mediapipe.solutions.pose.Pose` API.
+- Install a compatible package range: `python -m pip install "mediapipe>=0.10.14,<0.11"`.
 - Confirm you are in a Python 3.11+ environment (`python --version`).
 - If installation still fails on Linux, check whether your CPU architecture has an official MediaPipe wheel.
 
