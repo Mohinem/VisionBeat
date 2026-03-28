@@ -110,6 +110,51 @@ The detector is the musical core of VisionBeat. Its tests use synthetic timestam
 
 These tests are especially valuable because they validate the instrument’s semantic behavior without relying on a noisy real-world webcam loop.
 
+
+## Synthetic motion generator for gesture tests
+
+VisionBeat now includes a reusable synthetic motion helper at `tests/synthetic_motion.py`.
+
+Use `SyntheticMotionGenerator` to create deterministic frame-by-frame wrist trajectories in the same `TrackerOutput` structure consumed by `GestureDetector.update(...)`.
+
+### Built-in motion patterns
+
+- `stationary_hand(...)`
+- `forward_punch(...)`
+- `downward_strike(...)`
+- `jitter_noise(...)`
+- `non_trigger_movement(...)`
+
+All pattern builders support configurable motion parameters:
+
+- `velocity` (or axis-specific velocity tuple for stationary/jitter),
+- `duration`,
+- `noise`,
+- and `start_time`.
+
+### Converting patterns into detector-ready frames
+
+Use `to_tracker_outputs(...)` to convert a generated motion sequence into `TrackerOutput` frames with wrist landmarks and timestamps:
+
+```python
+from tests.synthetic_motion import SyntheticMotionGenerator
+
+generator = SyntheticMotionGenerator(frame_interval=0.05, seed=11)
+sequence = generator.forward_punch(duration=0.10, velocity=2.5, noise=0.01)
+frames = generator.to_tracker_outputs(sequence, hand="right")
+```
+
+This keeps gesture tests expressive while avoiding repetitive hand-written timestamp/landmark tuples.
+
+### Adding a new gesture test quickly
+
+1. Create a sequence with the closest built-in pattern and tune `velocity`, `duration`, and `noise`.
+2. Convert it with `to_tracker_outputs(...)`.
+3. Feed frames into `GestureDetector.update(...)` and assert on candidates/events.
+4. If introducing a new gesture class, add a dedicated generator method so future tests can reuse it.
+
+The dedicated generator unit tests (`tests/unit/test_synthetic_motion_generator.py`) lock down determinism, axis direction, noise behavior, and output structure so gesture tests can rely on stable synthetic data.
+
 ## Hardware-dependent testing
 
 Most of the suite is hardware independent, but one integration test is marked with `@pytest.mark.webcam` and expects a real default webcam.

@@ -378,6 +378,39 @@ def test_epsilon_inclusive_threshold_logic_at_exact_boundary() -> None:
     assert detector._meets_punch_candidate(metrics) is True
 
 
+
+@pytest.mark.parametrize(
+    ("builder", "velocity", "duration", "noise", "expected"),
+    [
+        ("forward_punch", 2.5, 0.10, 0.0, GestureType.KICK),
+        ("downward_strike", 2.6, 0.10, 0.0, GestureType.SNARE),
+        ("non_trigger_movement", 1.3, 0.10, 0.0, None),
+        ("jitter_noise", 0.0, 0.15, 0.05, None),
+    ],
+)
+def test_generator_sequences_drive_expected_detector_outcomes(
+    builder: str,
+    velocity: float,
+    duration: float,
+    noise: float,
+    expected: GestureType | None,
+    synthetic_motion_generator,
+) -> None:
+    detector = GestureDetector(GestureConfig(history_size=8))
+    sequence_builder = getattr(synthetic_motion_generator, builder)
+    kwargs = {"duration": duration, "noise": noise}
+    if builder != "jitter_noise":
+        kwargs["velocity"] = velocity
+    sequence = sequence_builder(**kwargs)
+
+    events = feed_frames(detector, synthetic_motion_generator.to_tracker_outputs(sequence))
+
+    if expected is None:
+        assert events == []
+    else:
+        assert len(events) == 1
+        assert events[0].gesture is expected
+
 def test_observer_receives_candidate_and_trigger_events(
     motion_sequences: dict[str, tuple[tuple[float, tuple[float, float, float]], ...]],
     sequence_to_frames,
