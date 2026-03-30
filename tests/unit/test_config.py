@@ -30,9 +30,14 @@ def test_load_config_supports_nested_yaml_sections() -> None:
 
     assert isinstance(config, AppConfig)
     assert config.camera.window_name == "VisionBeat"
-    assert config.gestures.thresholds.punch_forward_delta_z == pytest.approx(0.2)
-    assert config.gestures.thresholds.strike_down_delta_y == pytest.approx(0.26)
+    assert config.gestures.thresholds.punch_forward_delta_z == pytest.approx(0.14)
+    assert config.gestures.thresholds.strike_down_delta_y == pytest.approx(0.17)
+    assert config.gestures.thresholds.axis_dominance_ratio == pytest.approx(1.2)
     assert config.gestures.cooldowns.trigger_seconds == pytest.approx(0.2)
+    assert config.gestures.cooldowns.analysis_window_seconds == pytest.approx(0.24)
+    assert config.gestures.cooldowns.confirmation_window_seconds == pytest.approx(0.18)
+    assert config.gestures.velocity_smoothing_alpha == pytest.approx(0.55)
+    assert config.gestures.rearm_threshold_ratio == pytest.approx(0.45)
     assert config.audio.sample_mapping == {
         "kick": "assets/samples/kick.wav",
         "snare": "assets/samples/snare.wav",
@@ -111,7 +116,12 @@ event_log_format = "csv"
         ),
         (
             GestureConfig.from_dict,
-            {"history_size": 8, "active_hand": "left"},
+            {
+                "history_size": 8,
+                "active_hand": "left",
+                "velocity_smoothing_alpha": 0.6,
+                "rearm_threshold_ratio": 0.5,
+            },
             GestureConfig,
         ),
         (
@@ -193,6 +203,14 @@ def test_gesture_threshold_config_validation_errors(
             "gestures.active_hand: must be either 'left' or 'right'.",
         ),
         ({"history_size": 0}, "gestures.history_size: must be greater than 0"),
+        (
+            {"velocity_smoothing_alpha": 0.0},
+            "gestures.velocity_smoothing_alpha: must be greater than 0.0",
+        ),
+        (
+            {"rearm_threshold_ratio": 1.5},
+            "gestures.rearm_threshold_ratio: must be less than or equal to 1.0",
+        ),
     ],
 )
 def test_gesture_config_validation_errors(payload: dict[str, object], message: str) -> None:

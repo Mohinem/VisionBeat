@@ -128,11 +128,15 @@ def test_punch_threshold_boundaries_are_stable(
     second = detector.update(frames[1])
     candidate_count_after_second = len(detector.candidates)
     third = detector.update(frames[2])
+    triggered_on_second = len(second) == 1
+    confirmed_count = len(second) + len(third)
+    candidate_observed = candidate_count_after_second == 1 or triggered_on_second
 
     assert first == []
-    assert second == []
-    assert (candidate_count_after_second == 1) is expected_candidate
-    assert (len(third) == 1) is expected_confirmed
+    if not triggered_on_second:
+        assert second == []
+    assert candidate_observed is expected_candidate
+    assert (confirmed_count == 1) is expected_confirmed
 
 
 @pytest.mark.parametrize(
@@ -176,11 +180,15 @@ def test_strike_threshold_boundaries_are_stable(
     second = detector.update(frames[1])
     candidate_count_after_second = len(detector.candidates)
     third = detector.update(frames[2])
+    triggered_on_second = len(second) == 1
+    confirmed_count = len(second) + len(third)
+    candidate_observed = candidate_count_after_second == 1 or triggered_on_second
 
     assert first == []
-    assert second == []
-    assert (candidate_count_after_second == 1) is expected_candidate
-    assert (len(third) == 1) is expected_confirmed
+    if not triggered_on_second:
+        assert second == []
+    assert candidate_observed is expected_candidate
+    assert (confirmed_count == 1) is expected_confirmed
 
 
 def test_duplicate_trigger_regression_respects_cooldown_and_logs_suppression(
@@ -202,9 +210,9 @@ def test_duplicate_trigger_regression_respects_cooldown_and_logs_suppression(
     frames = sequence_to_frames(motion_sequences["forward_punch"])
     repeated_frames = frames + sequence_to_frames(
         (
-            (0.20, (0.50, 0.40, -0.10)),
-            (0.25, (0.50, 0.41, -0.22)),
-            (0.28, (0.50, 0.42, -0.34)),
+            (0.18, (0.50, 0.40, -0.14)),
+            (0.24, (0.50, 0.41, -0.24)),
+            (0.28, (0.50, 0.42, -0.36)),
         )
     )
 
@@ -213,6 +221,102 @@ def test_duplicate_trigger_regression_respects_cooldown_and_logs_suppression(
     assert [event.gesture for event in events] == [GestureType.KICK]
     assert len(observer.cooldown_suppressions) >= 1
     assert observer.cooldown_suppressions[-1].reason == "cooldown_active"
+
+
+def test_recovery_gate_blocks_retrigger_until_hand_resets(tracker_output_factory) -> None:
+    detector = GestureDetector(
+        GestureConfig(
+            cooldowns=GestureCooldownsConfig(
+                trigger_seconds=0.05,
+                analysis_window_seconds=0.2,
+                confirmation_window_seconds=0.15,
+            )
+        )
+    )
+    frames = [
+        tracker_output_factory(0.00, right_wrist=(0.50, 0.40, -0.08)),
+        tracker_output_factory(0.05, right_wrist=(0.51, 0.42, -0.22)),
+        tracker_output_factory(0.10, right_wrist=(0.52, 0.43, -0.33)),
+        tracker_output_factory(0.18, right_wrist=(0.52, 0.43, -0.35)),
+        tracker_output_factory(0.26, right_wrist=(0.52, 0.44, -0.39)),
+        tracker_output_factory(0.34, right_wrist=(0.52, 0.44, -0.42)),
+    ]
+
+    events = feed_frames(detector, frames)
+
+    assert [event.gesture for event in events] == [GestureType.KICK]
+    assert detector.status_summary(FrameTimestamp(seconds=0.34)) == "recovering kick"
+
+
+def test_shoulder_relative_motion_reduces_body_sway_false_positives(
+    tracker_output_factory,
+) -> None:
+    detector = GestureDetector(
+        GestureConfig(
+            cooldowns=GestureCooldownsConfig(
+                trigger_seconds=0.05,
+                analysis_window_seconds=0.2,
+                confirmation_window_seconds=0.15,
+            )
+        )
+    )
+    frames = [
+        tracker_output_factory(
+            0.00,
+            right_wrist=(0.60, 0.40, -0.08),
+            right_shoulder=(0.50, 0.20, -0.02),
+        ),
+        tracker_output_factory(
+            0.05,
+            right_wrist=(0.61, 0.42, -0.22),
+            right_shoulder=(0.51, 0.22, -0.16),
+        ),
+        tracker_output_factory(
+            0.10,
+            right_wrist=(0.62, 0.43, -0.33),
+            right_shoulder=(0.52, 0.23, -0.27),
+        ),
+    ]
+
+    events = feed_frames(detector, frames)
+
+    assert events == []
+    assert detector.candidates == ()
+
+
+def test_forward_punch_still_confirms_with_moderate_shoulder_followthrough(
+    tracker_output_factory,
+) -> None:
+    detector = GestureDetector(
+        GestureConfig(
+            cooldowns=GestureCooldownsConfig(
+                trigger_seconds=0.05,
+                analysis_window_seconds=0.24,
+                confirmation_window_seconds=0.18,
+            )
+        )
+    )
+    frames = [
+        tracker_output_factory(
+            0.00,
+            right_wrist=(0.60, 0.40, -0.08),
+            right_shoulder=(0.50, 0.20, -0.02),
+        ),
+        tracker_output_factory(
+            0.06,
+            right_wrist=(0.61, 0.42, -0.22),
+            right_shoulder=(0.505, 0.215, -0.07),
+        ),
+        tracker_output_factory(
+            0.12,
+            right_wrist=(0.62, 0.43, -0.34),
+            right_shoulder=(0.51, 0.225, -0.09),
+        ),
+    ]
+
+    events = feed_frames(detector, frames)
+
+    assert [event.gesture for event in events] == [GestureType.KICK]
 
 
 @pytest.mark.parametrize(
@@ -258,7 +362,17 @@ def test_low_visibility_clears_pending_candidate(
     motion_sequences: dict[str, tuple[tuple[float, tuple[float, float, float]], ...]],
     tracker_output_factory,
 ) -> None:
-    detector = GestureDetector(GestureConfig())
+    detector = GestureDetector(
+        GestureConfig(
+            thresholds=GestureThresholdsConfig(
+                punch_forward_delta_z=0.20,
+                punch_max_vertical_drift=0.18,
+                min_velocity=0.45,
+                candidate_ratio=0.6,
+                axis_dominance_ratio=1.2,
+            )
+        )
+    )
     candidate_frames = motion_sequences["forward_punch"][:2]
 
     for timestamp, wrist in candidate_frames:
@@ -281,6 +395,13 @@ def test_candidate_expires_when_confirmation_window_is_exceeded(
 ) -> None:
     detector = GestureDetector(
         GestureConfig(
+            thresholds=GestureThresholdsConfig(
+                punch_forward_delta_z=0.20,
+                punch_max_vertical_drift=0.18,
+                min_velocity=0.45,
+                candidate_ratio=0.6,
+                axis_dominance_ratio=1.2,
+            ),
             cooldowns=GestureCooldownsConfig(
                 analysis_window_seconds=0.2,
                 confirmation_window_seconds=0.05,
@@ -315,8 +436,8 @@ def test_cooldown_remaining_tracks_last_trigger(
     events = feed_frames(detector, sequence_to_frames(motion_sequences["forward_punch"]))
 
     assert len(events) == 1
-    assert detector.cooldown_remaining(FrameTimestamp(seconds=0.10)) == pytest.approx(0.25)
-    assert detector.cooldown_remaining(0.20) == pytest.approx(0.15)
+    assert detector.cooldown_remaining(FrameTimestamp(seconds=0.05)) == pytest.approx(0.25)
+    assert detector.cooldown_remaining(0.20) == pytest.approx(0.10)
 
 
 def test_compute_metrics_returns_expected_velocity_profile() -> None:

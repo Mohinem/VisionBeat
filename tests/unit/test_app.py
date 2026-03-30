@@ -252,6 +252,42 @@ def test_runtime_orchestrates_tracking_detection_audio_and_overlay() -> None:
     assert preview.show_calls == [("VisionBeat", "rendered:7")]
 
 
+def test_runtime_tracks_on_raw_frame_and_renders_mirrored_preview() -> None:
+    raw_frame = FakeFrame("raw-frame")
+    mirrored_frame = FakeFrame("mirrored-frame")
+    pose = TrackerOutput(
+        timestamp=FrameTimestamp(seconds=1.0),
+        landmarks={"right_wrist": LandmarkPoint(x=0.2, y=0.4, z=-0.3, visibility=0.9)},
+        person_detected=True,
+        status="tracking",
+    )
+    runtime = VisionBeatRuntime(
+        config=AppConfig(),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=raw_frame,
+                    captured_at=1.0,
+                    frame_index=0,
+                    display_image=mirrored_frame,
+                    mirrored_for_display=True,
+                )
+            ]
+        ),
+        tracker=FakeTracker([pose]),
+        detector=FakeDetector(events_by_frame=[[]], candidates_by_frame=[()], cooldowns=[0.0]),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False]),
+    )
+
+    runtime.process_next_frame()
+
+    assert runtime.tracker.process_calls[0][0] is raw_frame
+    assert runtime.overlay.calls[0][0] is mirrored_frame
+    assert runtime.overlay.calls[0][1].pose.get("right_wrist").x == pytest.approx(0.8)
+
+
 def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
     frames = [
         CameraFrame(image=FakeFrame("frame-0"), captured_at=1.0, frame_index=0),

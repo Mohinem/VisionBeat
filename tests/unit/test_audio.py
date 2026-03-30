@@ -191,7 +191,25 @@ def test_audio_engine_disables_loading_when_mixer_initialization_fails(tmp_path:
 
     assert engine.available_sounds() == ()
     assert set(engine.missing_sounds()) == {"kick", "snare"}
+    assert engine.status_summary().startswith("audio unavailable")
     assert fake_pygame.mixer.quit_calls == 0
+
+
+def test_audio_engine_status_summary_reports_partial_sample_availability(tmp_path: Path) -> None:
+    kick = tmp_path / "kick.wav"
+    create_sample(kick)
+    engine = PygameAudioEngine(
+        config=AudioConfig(
+            sample_mapping={
+                "kick": kick.as_posix(),
+                "snare": (tmp_path / "missing-snare.wav").as_posix(),
+            },
+        ),
+        pygame_module=FakePygame(),
+    )
+
+    assert engine.is_ready() is True
+    assert engine.status_summary() == "audio partial (snare missing)"
 
 
 @pytest.mark.parametrize(

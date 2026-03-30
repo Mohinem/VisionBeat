@@ -131,6 +131,12 @@ class VisionBeatRuntime:
         pose = self.tracker.process(camera_frame.image, timestamp)
         events = list(self.detector.update(pose))
         current_candidate = self._select_candidate()
+        display_pose = self._pose_for_display(pose, mirrored=camera_frame.mirrored_for_display)
+        display_frame = (
+            camera_frame.display_image
+            if camera_frame.display_image is not None
+            else camera_frame.image
+        )
 
         logger.debug(
             "Frame index=%s tracking_status=%s detected=%s candidates=%s events=%s",
@@ -148,14 +154,16 @@ class VisionBeatRuntime:
             self._handle_confirmed_gesture(event)
 
         render_state = RenderState(
-            pose=pose,
+            pose=display_pose,
             frame_index=camera_frame.frame_index,
             fps=self._compute_fps(camera_frame),
             current_candidate=current_candidate,
             confirmed_gesture=self._last_confirmed_gesture,
             cooldown_remaining_seconds=self.detector.cooldown_remaining(timestamp),
+            detector_status=self._detector_status(timestamp),
+            audio_status=self._audio_status(),
         )
-        rendered_frame = self.overlay.render(camera_frame.image, render_state)
+        rendered_frame = self.overlay.render(display_frame, render_state)
         self.preview.show(self.config.camera.window_name, rendered_frame)
 
         key_code = self.preview.poll_key()
@@ -192,6 +200,37 @@ class VisionBeatRuntime:
         if not self.detector.candidates:
             return None
         return max(self.detector.candidates, key=lambda candidate: candidate.confidence)
+
+    def _detector_status(self, timestamp: FrameTimestamp) -> str | None:
+        """Return a short detector-phase summary when the implementation exposes one."""
+        summary = getattr(self.detector, "status_summary", None)
+        if not callable(summary):
+            return None
+        result = summary(timestamp)
+        if not isinstance(result, str):
+            return None
+        normalized = result.strip()
+        return normalized or None
+
+    def _pose_for_display(self, pose: Any, *, mirrored: bool) -> Any:
+        """Return pose data aligned to the preview frame orientation."""
+        if not mirrored:
+            return pose
+        mirror = getattr(pose, "mirrored_horizontally", None)
+        if not callable(mirror):
+            return pose
+        return mirror()
+
+    def _audio_status(self) -> str | None:
+        """Return a short audio readiness summary when the implementation exposes one."""
+        summary = getattr(self.audio, "status_summary", None)
+        if not callable(summary):
+            return None
+        result = summary()
+        if not isinstance(result, str):
+            return None
+        normalized = result.strip()
+        return normalized or None
 
     def _compute_fps(self, camera_frame: CameraFrame) -> float | None:
         """Compute an instantaneous FPS estimate from captured frame timestamps."""
@@ -282,6 +321,7 @@ class VisionBeatApp:
                 "camera_resolution": f"{self.config.camera.width}x{self.config.camera.height}",
                 "camera_fps": self.config.camera.fps,
                 "active_hand": self.config.gestures.active_hand,
+                "audio_status": self._audio_status(),
                 "event_log_format": self.config.logging.event_log_format,
                 "event_log_path": self.config.logging.event_log_path,
             }
@@ -303,6 +343,17 @@ class VisionBeatApp:
     def run(self) -> None:
         """Run the real-time webcam processing loop until the user exits."""
         self.runtime.run()
+
+    def _audio_status(self) -> str | None:
+        """Return a short audio readiness summary when the implementation exposes one."""
+        summary = getattr(self.audio, "status_summary", None)
+        if not callable(summary):
+            return None
+        result = summary()
+        if not isinstance(result, str):
+            return None
+        normalized = result.strip()
+        return normalized or None
 
     def close(self) -> None:
         """Release external resources used by the app."""

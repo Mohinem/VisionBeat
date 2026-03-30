@@ -244,13 +244,13 @@ class TrackerConfig:
 class GestureThresholdsConfig:
     """Motion thresholds for gesture detection and confirmation."""
 
-    punch_forward_delta_z: float = 0.2
-    punch_max_vertical_drift: float = 0.1
-    strike_down_delta_y: float = 0.26
-    strike_max_depth_drift: float = 0.1
-    min_velocity: float = 0.75
-    candidate_ratio: float = 0.7
-    axis_dominance_ratio: float = 1.7
+    punch_forward_delta_z: float = 0.14
+    punch_max_vertical_drift: float = 0.18
+    strike_down_delta_y: float = 0.17
+    strike_max_depth_drift: float = 0.18
+    min_velocity: float = 0.45
+    candidate_ratio: float = 0.6
+    axis_dominance_ratio: float = 1.2
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> GestureThresholdsConfig:
@@ -269,25 +269,25 @@ class GestureThresholdsConfig:
         )
         return cls(
             punch_forward_delta_z=reader.number(
-                "punch_forward_delta_z", default=0.2, minimum=0.0, inclusive_min=False
+                "punch_forward_delta_z", default=0.14, minimum=0.0, inclusive_min=False
             ),
             punch_max_vertical_drift=reader.number(
-                "punch_max_vertical_drift", default=0.1, minimum=0.0, inclusive_min=False
+                "punch_max_vertical_drift", default=0.18, minimum=0.0, inclusive_min=False
             ),
             strike_down_delta_y=reader.number(
-                "strike_down_delta_y", default=0.26, minimum=0.0, inclusive_min=False
+                "strike_down_delta_y", default=0.17, minimum=0.0, inclusive_min=False
             ),
             strike_max_depth_drift=reader.number(
-                "strike_max_depth_drift", default=0.1, minimum=0.0, inclusive_min=False
+                "strike_max_depth_drift", default=0.18, minimum=0.0, inclusive_min=False
             ),
             min_velocity=reader.number(
-                "min_velocity", default=0.75, minimum=0.0, inclusive_min=False
+                "min_velocity", default=0.45, minimum=0.0, inclusive_min=False
             ),
             candidate_ratio=reader.number(
-                "candidate_ratio", default=0.7, minimum=0.0, maximum=1.0, inclusive_min=False
+                "candidate_ratio", default=0.6, minimum=0.0, maximum=1.0, inclusive_min=False
             ),
             axis_dominance_ratio=reader.number(
-                "axis_dominance_ratio", default=1.7, minimum=1.0
+                "axis_dominance_ratio", default=1.2, minimum=1.0
             ),
         )
 
@@ -309,8 +309,8 @@ class GestureCooldownsConfig:
     """Timing windows that control gesture buffering and cooldown behavior."""
 
     trigger_seconds: float = 0.2
-    analysis_window_seconds: float = 0.18
-    confirmation_window_seconds: float = 0.12
+    analysis_window_seconds: float = 0.24
+    confirmation_window_seconds: float = 0.18
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> GestureCooldownsConfig:
@@ -324,10 +324,10 @@ class GestureCooldownsConfig:
                 "trigger_seconds", default=0.2, minimum=0.0, inclusive_min=False
             ),
             analysis_window_seconds=reader.number(
-                "analysis_window_seconds", default=0.18, minimum=0.0, inclusive_min=False
+                "analysis_window_seconds", default=0.24, minimum=0.0, inclusive_min=False
             ),
             confirmation_window_seconds=reader.number(
-                "confirmation_window_seconds", default=0.12, minimum=0.0, inclusive_min=False
+                "confirmation_window_seconds", default=0.18, minimum=0.0, inclusive_min=False
             ),
         )
 
@@ -348,12 +348,23 @@ class GestureConfig:
     cooldowns: GestureCooldownsConfig = field(default_factory=GestureCooldownsConfig)
     history_size: int = 6
     active_hand: str = "right"
+    velocity_smoothing_alpha: float = 0.55
+    rearm_threshold_ratio: float = 0.45
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> GestureConfig:
         """Build gesture configuration from a validated mapping."""
         reader = _ConfigReader(payload, path="gestures")
-        reader.reject_unknown_keys({"thresholds", "cooldowns", "history_size", "active_hand"})
+        reader.reject_unknown_keys(
+            {
+                "thresholds",
+                "cooldowns",
+                "history_size",
+                "active_hand",
+                "velocity_smoothing_alpha",
+                "rearm_threshold_ratio",
+            }
+        )
         active_hand = reader.string("active_hand", default="right", non_empty=True) or "right"
         active_hand = active_hand.lower()
         if active_hand not in {"left", "right"}:
@@ -367,6 +378,20 @@ class GestureConfig:
             ),
             history_size=reader.integer("history_size", default=6, minimum=1),
             active_hand=active_hand,
+            velocity_smoothing_alpha=reader.number(
+                "velocity_smoothing_alpha",
+                default=0.55,
+                minimum=0.0,
+                maximum=1.0,
+                inclusive_min=False,
+            ),
+            rearm_threshold_ratio=reader.number(
+                "rearm_threshold_ratio",
+                default=0.45,
+                minimum=0.0,
+                maximum=1.0,
+                inclusive_min=False,
+            ),
         )
 
     @classmethod
@@ -431,6 +456,8 @@ class GestureConfig:
             "cooldowns": self.cooldowns.to_dict(),
             "history_size": self.history_size,
             "active_hand": self.active_hand,
+            "velocity_smoothing_alpha": self.velocity_smoothing_alpha,
+            "rearm_threshold_ratio": self.rearm_threshold_ratio,
         }
 
 

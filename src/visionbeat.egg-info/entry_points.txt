@@ -1,0 +1,2 @@
+[console_scripts]
+visionbeat = visionbeat.__main__:main

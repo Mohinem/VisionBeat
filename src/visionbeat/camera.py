@@ -22,6 +22,8 @@ class CameraFrame:
     image: Frame
     captured_at: float
     frame_index: int
+    display_image: Frame | None = None
+    mirrored_for_display: bool = False
 
 
 @dataclass(slots=True)
@@ -98,14 +100,17 @@ class CameraSource(CameraSourceProtocol):
                 "locked by another application."
             )
 
+        display_frame = frame
         if self.config.mirror:
             assert self._cv2 is not None
-            frame = self._cv2.flip(frame, 1)
+            display_frame = self._cv2.flip(frame, 1)
 
         metadata = CameraFrame(
             image=frame,
+            display_image=display_frame,
             captured_at=time.monotonic(),
             frame_index=self._frame_index,
+            mirrored_for_display=self.config.mirror,
         )
         self._frame_index += 1
         logger.debug("Captured camera frame index=%s", metadata.frame_index)

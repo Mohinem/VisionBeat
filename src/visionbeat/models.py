@@ -85,6 +85,15 @@ class LandmarkPoint:
             visibility=payload.get("visibility", 1.0),
         )
 
+    def mirrored_horizontally(self) -> LandmarkPoint:
+        """Return a copy mirrored across the vertical image centerline."""
+        return LandmarkPoint(
+            x=1.0 - self.x,
+            y=self.y,
+            z=self.z,
+            visibility=self.visibility,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class DetectionCandidate:
@@ -237,6 +246,19 @@ class TrackerOutput:
         """Return a landmark by name if it is present in the frame."""
         return self.landmarks.get(name)
 
+    def mirrored_horizontally(self) -> TrackerOutput:
+        """Return tracker output mirrored across the vertical image centerline."""
+        return TrackerOutput(
+            timestamp=self.timestamp,
+            landmarks={
+                name: point.mirrored_horizontally()
+                for name, point in self.landmarks.items()
+            },
+            candidates=self.candidates,
+            person_detected=self.person_detected,
+            status=self.status,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize tracker output into a JSON-friendly dictionary."""
         return {
@@ -275,6 +297,8 @@ class RenderState:
     current_candidate: DetectionCandidate | None = None
     confirmed_gesture: GestureEvent | None = None
     cooldown_remaining_seconds: float = 0.0
+    detector_status: str | None = None
+    audio_status: str | None = None
 
     def __post_init__(self) -> None:
         """Validate loop-derived overlay state values."""
@@ -294,6 +318,10 @@ class RenderState:
         if cooldown < 0.0:
             raise ValueError("cooldown_remaining_seconds must be greater than or equal to zero.")
         object.__setattr__(self, "cooldown_remaining_seconds", cooldown)
+        if self.detector_status is not None:
+            object.__setattr__(self, "detector_status", self.detector_status.strip() or None)
+        if self.audio_status is not None:
+            object.__setattr__(self, "audio_status", self.audio_status.strip() or None)
 
 
 PoseFrame = TrackerOutput

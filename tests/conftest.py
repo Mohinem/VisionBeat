@@ -53,8 +53,12 @@ def tracker_output_factory() -> Callable[..., TrackerOutput]:
         *,
         right_wrist: tuple[float, float, float] | None = None,
         left_wrist: tuple[float, float, float] | None = None,
+        right_shoulder: tuple[float, float, float] | None = None,
+        left_shoulder: tuple[float, float, float] | None = None,
         right_visibility: float = 1.0,
         left_visibility: float = 1.0,
+        right_shoulder_visibility: float = 1.0,
+        left_shoulder_visibility: float = 1.0,
         status: str = "tracking",
         person_detected: bool | None = None,
     ) -> TrackerOutput:
@@ -74,6 +78,22 @@ def tracker_output_factory() -> Callable[..., TrackerOutput]:
                 y=y,
                 z=z,
                 visibility=left_visibility,
+            )
+        if right_shoulder is not None:
+            x, y, z = right_shoulder
+            landmarks["right_shoulder"] = LandmarkPoint(
+                x=x,
+                y=y,
+                z=z,
+                visibility=right_shoulder_visibility,
+            )
+        if left_shoulder is not None:
+            x, y, z = left_shoulder
+            landmarks["left_shoulder"] = LandmarkPoint(
+                x=x,
+                y=y,
+                z=z,
+                visibility=left_shoulder_visibility,
             )
         return TrackerOutput(
             timestamp=FrameTimestamp(seconds=timestamp),

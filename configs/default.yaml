@@ -14,21 +14,22 @@ tracker:
 
 gestures:
   thresholds:
-    # Tuned for a crisp forward punch without over-triggering from arm drift.
-    punch_forward_delta_z: 0.2
-    punch_max_vertical_drift: 0.1
-    # Tuned for a decisive downward strike that still tolerates small depth wobble.
-    strike_down_delta_y: 0.26
-    strike_max_depth_drift: 0.1
-    min_velocity: 0.75
-    candidate_ratio: 0.7
-    axis_dominance_ratio: 1.7
+    # Looser defaults for live demo use with a single webcam and natural arm motion.
+    punch_forward_delta_z: 0.14
+    punch_max_vertical_drift: 0.18
+    strike_down_delta_y: 0.17
+    strike_max_depth_drift: 0.18
+    min_velocity: 0.45
+    candidate_ratio: 0.6
+    axis_dominance_ratio: 1.2
   cooldowns:
     trigger_seconds: 0.2
-    analysis_window_seconds: 0.18
-    confirmation_window_seconds: 0.12
+    analysis_window_seconds: 0.24
+    confirmation_window_seconds: 0.18
   history_size: 6
   active_hand: right
+  velocity_smoothing_alpha: 0.55
+  rearm_threshold_ratio: 0.45
 
 audio:
   backend: pygame

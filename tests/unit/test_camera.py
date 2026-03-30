@@ -51,7 +51,9 @@ def test_camera_source_open_and_read_frame() -> None:
     camera.open()
     frame = camera.read_frame()
 
-    assert frame.image == ("flipped", "frame-a", 1)
+    assert frame.image == "frame-a"
+    assert frame.display_image == ("flipped", "frame-a", 1)
+    assert frame.mirrored_for_display is True
     assert frame.frame_index == 0
     assert capture.properties == [(3, 1280), (4, 720), (5, 30)]
 

@@ -165,6 +165,21 @@ def test_tracker_output_normalizes_landmarks_candidates_and_status() -> None:
     assert TrackerOutput.from_dict(output.to_dict()) == output
 
 
+def test_tracker_output_can_be_mirrored_horizontally() -> None:
+    output = TrackerOutput(
+        timestamp=FrameTimestamp(seconds=1.25),
+        landmarks={"right_wrist": LandmarkPoint(x=0.2, y=0.5, z=-0.2, visibility=0.9)},
+        person_detected=True,
+        status="tracking",
+    )
+
+    mirrored = output.mirrored_horizontally()
+
+    assert mirrored.get("right_wrist").x == pytest.approx(0.8)
+    assert mirrored.get("right_wrist").y == pytest.approx(0.5)
+    assert mirrored.get("right_wrist").z == pytest.approx(-0.2)
+
+
 @pytest.mark.parametrize(
     ("fps", "cooldown_remaining_seconds"),
     [(None, 0.0), (60.0, 0.25)],

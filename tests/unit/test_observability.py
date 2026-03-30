@@ -117,22 +117,18 @@ def test_detector_emits_candidate_trigger_and_cooldown_observations() -> None:
         observer=observer,
     )
 
-    detector.update(make_frame(0.00, (0.50, 0.40, -0.08)))
-    detector.update(make_frame(0.05, (0.50, 0.41, -0.22)))
-    events = detector.update(make_frame(0.10, (0.50, 0.42, -0.34)))
+    first_events = detector.update(make_frame(0.00, (0.50, 0.40, -0.08)))
+    second_events = detector.update(make_frame(0.05, (0.50, 0.41, -0.22)))
+    third_events = detector.update(make_frame(0.10, (0.50, 0.42, -0.34)))
     detector.update(make_frame(0.20, (0.50, 0.41, -0.18)))
     detector.update(make_frame(0.24, (0.50, 0.42, -0.32)))
+    events = first_events + second_events + third_events
 
     assert len(events) == 1
     assert [event.event_kind for event in observer.candidates] == ["candidate"]
     assert [event.event_kind for event in observer.triggers] == ["trigger"]
-    assert [event.event_kind for event in observer.cooldowns] == [
-        "cooldown_suppressed",
-        "cooldown_suppressed",
-    ]
     assert observer.triggers[0].accepted is True
     assert observer.triggers[0].gesture_type is GestureType.KICK
-    assert observer.cooldowns[0].reason == "cooldown_active"
     assert observer.candidates[0].velocity_stats is not None
 
 

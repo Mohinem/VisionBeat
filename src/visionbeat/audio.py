@@ -63,6 +63,7 @@ class PygameAudioEngine(AudioEngine):
     _sounds: dict[str, Any] = field(init=False, default_factory=dict)
     _assets: dict[str, SampleAsset] = field(init=False, default_factory=dict)
     _mixer_ready: bool = field(init=False, default=False)
+    _init_failure_reason: str | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         """Initialize the pygame mixer and attempt to load configured sample assets."""
@@ -95,9 +96,11 @@ class PygameAudioEngine(AudioEngine):
             )
             self._pygame.mixer.set_num_channels(self.config.simultaneous_voices)
             self._mixer_ready = True
+            self._init_failure_reason = None
         except Exception as exc:  # pragma: no cover - defensive for environment variance
             logger.warning("Audio mixer initialization failed: %s", exc)
             self._mixer_ready = False
+            self._init_failure_reason = str(exc).strip() or exc.__class__.__name__
 
     def _load_available_sounds(self) -> dict[str, Any]:
         """Load any configured samples that are present on disk."""
@@ -139,6 +142,22 @@ class PygameAudioEngine(AudioEngine):
     def missing_sounds(self) -> tuple[str, ...]:
         """Return the names of samples that could not be loaded."""
         return tuple(sorted(name for name in self._assets if name not in self._sounds))
+
+    def is_ready(self) -> bool:
+        """Return whether the mixer is usable and at least one sample is loaded."""
+        return self._mixer_ready and bool(self._sounds)
+
+    def status_summary(self) -> str:
+        """Return a short human-readable summary of audio readiness."""
+        if not self._mixer_ready:
+            detail = self._init_failure_reason or "mixer unavailable"
+            return f"audio unavailable ({detail})"
+        if not self._sounds:
+            return "audio unavailable (no samples loaded)"
+        missing = self.missing_sounds()
+        if missing:
+            return f"audio partial ({', '.join(missing)} missing)"
+        return f"audio ready ({', '.join(self.available_sounds())})"
 
     def trigger_sound(self, name: str, intensity: float = 1.0) -> bool:
         """Trigger a named sample with optional intensity scaling."""

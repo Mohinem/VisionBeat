@@ -83,7 +83,9 @@ def test_webcam_capture_scaffolding_allows_camera_source_without_hardware(monkey
     frame = camera.read_frame()
     camera.close()
 
-    assert frame.image == ("flipped", "frame-0", 1)
+    assert frame.image == "frame-0"
+    assert frame.display_image == ("flipped", "frame-0", 1)
+    assert frame.mirrored_for_display is True
     assert frame.frame_index == 0
     assert fake_capture.properties == [(3, 640), (4, 480), (5, 24)]
     assert fake_capture.released is True
@@ -238,7 +240,7 @@ def test_pose_tracker_uses_tasks_pose_landmarker_when_solutions_pose_is_unavaila
 
 @pytest.mark.webcam
 def test_default_webcam_can_capture_frame() -> None:
-    pytest.importorskip("cv2", exc_type=ImportError)
+    pytest.importorskip("cv2")
 
     camera = CameraSource(CameraConfig())
     try:

@@ -99,6 +99,14 @@ class PendingGesture:
     label: str
 
 
+@dataclass(frozen=True, slots=True)
+class RecoveryState:
+    """Post-trigger recovery gate that prevents repeated hits from one motion."""
+
+    gesture: GestureType
+    anchor: MotionSample
+
+
 @dataclass(slots=True)
 class HandHistory:
     """Recent wrist samples plus cooldown and candidate state for a tracked hand."""
@@ -106,9 +114,11 @@ class HandHistory:
     samples: deque[MotionSample] = field(default_factory=deque)
     last_trigger_time: float = -1_000.0
     pending: PendingGesture | None = None
+    recovery: RecoveryState | None = None
 
 
 COMPARISON_EPSILON = 1e-9
+SHOULDER_DEPTH_COMPENSATION = 0.7
 
 
 class GestureDetector:
@@ -136,6 +146,19 @@ class GestureDetector:
         elapsed = seconds - history.last_trigger_time
         return max(0.0, self.config.cooldown_seconds - elapsed)
 
+    def status_summary(self, timestamp: FrameTimestamp | float | None = None) -> str:
+        """Return a short human-readable summary of the active hand detector state."""
+        history = self._histories[self.config.active_hand]
+        if history.recovery is not None:
+            return f"recovering {history.recovery.gesture.value}"
+        if history.pending is not None:
+            return history.pending.label
+        if timestamp is not None:
+            cooldown = self.cooldown_remaining(timestamp)
+            if cooldown > 0.0:
+                return f"cooldown {cooldown:.2f}s"
+        return "armed"
+
     def update(self, frame: TrackerOutput) -> list[GestureEvent]:
         """Consume tracker output and emit any newly detected gestures."""
         events: list[GestureEvent] = []
@@ -144,9 +167,12 @@ class GestureDetector:
             history = self._histories[hand]
             wrist = frame.get(f"{hand}_wrist")
             if wrist is None or wrist.visibility < 0.5:
-                history.pending = None
+                self._reset_history_state(history)
                 continue
-            self._append_sample(history, frame.timestamp.seconds, wrist)
+            self._append_sample(
+                history,
+                self._resolve_motion_sample(frame, hand, wrist),
+            )
             candidate, event = self._evaluate_hand(hand, history, frame.timestamp)
             if candidate is not None:
                 candidates.append(candidate)
@@ -155,12 +181,40 @@ class GestureDetector:
         self._last_candidates = tuple(candidates)
         return events
 
-    def _append_sample(self, history: HandHistory, timestamp: float, wrist: LandmarkPoint) -> None:
+    def _append_sample(self, history: HandHistory, sample: MotionSample) -> None:
         """Append a wrist sample and discard samples outside the configured time window."""
-        history.samples.append(MotionSample(timestamp, wrist.x, wrist.y, wrist.z))
-        min_timestamp = timestamp - self.config.analysis_window_seconds
+        history.samples.append(sample)
+        min_timestamp = sample.timestamp - self.config.analysis_window_seconds
         while len(history.samples) > 1 and history.samples[0].timestamp < min_timestamp:
             history.samples.popleft()
+
+    def _resolve_motion_sample(
+        self,
+        frame: TrackerOutput,
+        hand: str,
+        wrist: LandmarkPoint,
+    ) -> MotionSample:
+        """Return a wrist sample with partial shoulder compensation for body sway."""
+        shoulder = frame.get(f"{hand}_shoulder")
+        if shoulder is None or shoulder.visibility < 0.5:
+            return MotionSample(
+                timestamp=frame.timestamp.seconds,
+                x=wrist.x,
+                y=wrist.y,
+                z=wrist.z,
+            )
+        return MotionSample(
+            timestamp=frame.timestamp.seconds,
+            x=wrist.x - shoulder.x,
+            y=wrist.y - shoulder.y,
+            z=wrist.z - (shoulder.z * SHOULDER_DEPTH_COMPENSATION),
+        )
+
+    def _reset_history_state(self, history: HandHistory) -> None:
+        """Clear transient state when a wrist cannot be tracked reliably."""
+        history.samples.clear()
+        history.pending = None
+        history.recovery = None
 
     def _evaluate_hand(
         self,
@@ -176,6 +230,15 @@ class GestureDetector:
         metrics = self._compute_metrics(history.samples)
         if metrics is None:
             history.pending = None
+            return None, None
+
+        if history.recovery is not None:
+            if not self._recovery_complete(history.recovery, history.samples[-1], metrics):
+                history.pending = None
+                return None, None
+            history.recovery = None
+            history.pending = None
+            history.samples = deque((history.samples[-1],), maxlen=self.config.history_size)
             return None, None
 
         if timestamp.seconds - history.last_trigger_time < self.config.cooldown_seconds:
@@ -195,17 +258,16 @@ class GestureDetector:
                 return None, None
             candidate = self._build_candidate(history.pending.gesture, hand, metrics)
             self._emit_candidate(timestamp, candidate, metrics)
+            if self._is_confirmed(history.pending.gesture, metrics):
+                event = self._confirm_pending(history, hand, timestamp, metrics)
+                return None, event
             return candidate, None
 
         candidate = self._build_candidate(history.pending.gesture, hand, metrics)
         if not self._is_confirmed(history.pending.gesture, metrics):
             return candidate, None
 
-        gesture = history.pending.gesture
-        history.pending = None
-        history.last_trigger_time = timestamp.seconds
-        event = self._build_event(gesture, hand, timestamp, metrics)
-        self._emit_trigger(event, metrics)
+        event = self._confirm_pending(history, hand, timestamp, metrics)
         return None, event
 
     def _start_candidate(self, timestamp: float, metrics: MotionMetrics) -> PendingGesture | None:
@@ -229,6 +291,25 @@ class GestureDetector:
         if gesture is GestureType.KICK:
             return self._meets_punch_candidate(metrics)
         return self._meets_strike_candidate(metrics)
+
+    def _confirm_pending(
+        self,
+        history: HandHistory,
+        hand: str,
+        timestamp: FrameTimestamp,
+        metrics: MotionMetrics,
+    ) -> GestureEvent:
+        """Finalize the active pending gesture into a confirmed event."""
+        assert history.pending is not None
+        gesture = history.pending.gesture
+        anchor = history.samples[-1]
+        history.pending = None
+        history.last_trigger_time = timestamp.seconds
+        history.recovery = RecoveryState(gesture=gesture, anchor=anchor)
+        history.samples = deque((anchor,), maxlen=self.config.history_size)
+        event = self._build_event(gesture, hand, timestamp, metrics)
+        self._emit_trigger(event, metrics)
+        return event
 
     def _build_candidate(
         self,
@@ -307,10 +388,12 @@ class GestureDetector:
         if elapsed <= 0.0:
             return None
 
+        filtered_samples = self._smooth_samples(sample_list)
+
         deltas_x: list[float] = []
         deltas_y: list[float] = []
         deltas_z: list[float] = []
-        for previous, current in zip(sample_list, sample_list[1:], strict=False):
+        for previous, current in zip(filtered_samples, filtered_samples[1:], strict=False):
             frame_elapsed = current.timestamp - previous.timestamp
             if frame_elapsed <= 0.0:
                 continue
@@ -334,6 +417,58 @@ class GestureDetector:
             peak_y_velocity=max(deltas_y, key=abs),
             peak_z_velocity=max(deltas_z, key=abs),
         )
+
+    def _smooth_samples(self, samples: list[MotionSample]) -> list[MotionSample]:
+        """Smooth sample positions before computing per-frame peak velocities."""
+        if len(samples) < 2:
+            return samples
+
+        alpha = self.config.velocity_smoothing_alpha
+        if alpha >= 1.0 - COMPARISON_EPSILON:
+            return samples
+
+        smoothed = [samples[0]]
+        for sample in samples[1:]:
+            previous = smoothed[-1]
+            smoothed.append(
+                MotionSample(
+                    timestamp=sample.timestamp,
+                    x=previous.x + ((sample.x - previous.x) * alpha),
+                    y=previous.y + ((sample.y - previous.y) * alpha),
+                    z=previous.z + ((sample.z - previous.z) * alpha),
+                )
+            )
+        return smoothed
+
+    def _recovery_complete(
+        self,
+        recovery: RecoveryState,
+        current: MotionSample,
+        metrics: MotionMetrics,
+    ) -> bool:
+        """Return whether the hand has reset enough to arm a new gesture."""
+        required_distance = self._rearm_distance(recovery.gesture)
+        partial_distance = required_distance * 0.5
+        required_velocity = self.config.min_velocity * self.config.rearm_threshold_ratio
+        if recovery.gesture is GestureType.KICK:
+            reverse_distance = current.z - recovery.anchor.z
+            reverse_velocity = max(0.0, metrics.peak_z_velocity)
+        else:
+            reverse_distance = recovery.anchor.y - current.y
+            reverse_velocity = max(0.0, -metrics.peak_y_velocity)
+        return (
+            reverse_distance >= required_distance - COMPARISON_EPSILON
+            or (
+                reverse_distance >= partial_distance - COMPARISON_EPSILON
+                and reverse_velocity >= required_velocity - COMPARISON_EPSILON
+            )
+        )
+
+    def _rearm_distance(self, gesture: GestureType) -> float:
+        """Return the minimum opposite-direction travel needed after a trigger."""
+        if gesture is GestureType.KICK:
+            return self.config.punch_forward_delta_z * self.config.rearm_threshold_ratio
+        return self.config.strike_down_delta_y * self.config.rearm_threshold_ratio
 
     def _meets_punch_candidate(self, metrics: MotionMetrics) -> bool:
         """Return whether current motion is a viable punch candidate."""
