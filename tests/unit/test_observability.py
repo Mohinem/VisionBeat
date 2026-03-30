@@ -34,7 +34,10 @@ def make_frame(timestamp: float, right_wrist: tuple[float, float, float]) -> Tra
     x, y, z = right_wrist
     return TrackerOutput(
         timestamp=FrameTimestamp(seconds=timestamp),
-        landmarks={"right_wrist": LandmarkPoint(x=x, y=y, z=z, visibility=1.0)},
+        landmarks={
+            "right_wrist": LandmarkPoint(x=x, y=y, z=z, visibility=1.0),
+            "right_shoulder": LandmarkPoint(x=0.40, y=0.20, z=-0.02, visibility=1.0),
+        },
     )
 
 
@@ -44,7 +47,7 @@ def test_gesture_observation_round_trips_through_dict_and_jsonl(tmp_path: Path) 
         event_kind="trigger",
         gesture_type=GestureType.KICK,
         accepted=True,
-        reason="Forward punch → kick",
+        reason="Outward jab → kick",
         velocity_stats=VelocityStats(
             elapsed=0.08,
             delta_x=0.01,
@@ -118,10 +121,10 @@ def test_detector_emits_candidate_trigger_and_cooldown_observations() -> None:
     )
 
     first_events = detector.update(make_frame(0.00, (0.50, 0.40, -0.08)))
-    second_events = detector.update(make_frame(0.05, (0.50, 0.41, -0.22)))
-    third_events = detector.update(make_frame(0.10, (0.50, 0.42, -0.34)))
-    detector.update(make_frame(0.20, (0.50, 0.41, -0.18)))
-    detector.update(make_frame(0.24, (0.50, 0.42, -0.32)))
+    second_events = detector.update(make_frame(0.05, (0.60, 0.41, -0.09)))
+    third_events = detector.update(make_frame(0.10, (0.66, 0.41, -0.10)))
+    detector.update(make_frame(0.20, (0.53, 0.41, -0.08)))
+    detector.update(make_frame(0.24, (0.71, 0.42, -0.10)))
     events = first_events + second_events + third_events
 
     assert len(events) == 1

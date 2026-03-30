@@ -20,10 +20,10 @@ def motion_sequences() -> dict[str, MotionSequence]:
             (0.10, (0.50, 0.40, -0.10)),
             (0.15, (0.50, 0.40, -0.10)),
         ),
-        "forward_punch": (
+        "outward_jab": (
             (0.00, (0.50, 0.40, -0.08)),
-            (0.05, (0.51, 0.42, -0.22)),
-            (0.10, (0.52, 0.43, -0.33)),
+            (0.05, (0.60, 0.41, -0.09)),
+            (0.10, (0.66, 0.41, -0.10)),
         ),
         "downward_strike": (
             (0.00, (0.55, 0.20, -0.05)),
@@ -63,6 +63,10 @@ def tracker_output_factory() -> Callable[..., TrackerOutput]:
         person_detected: bool | None = None,
     ) -> TrackerOutput:
         landmarks: dict[str, LandmarkPoint] = {}
+        if right_wrist is not None and right_shoulder is None:
+            right_shoulder = (0.40, 0.20, -0.02)
+        if left_wrist is not None and left_shoulder is None:
+            left_shoulder = (0.60, 0.20, -0.02)
         if right_wrist is not None:
             x, y, z = right_wrist
             landmarks["right_wrist"] = LandmarkPoint(

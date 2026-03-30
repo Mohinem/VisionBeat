@@ -41,6 +41,7 @@ class MotionSample:
     x: float
     y: float
     z: float
+    shoulder_relative: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +50,12 @@ class MotionMetrics:
 
     elapsed: float
     delta_x: float
+    delta_abs_x: float
     delta_y: float
     delta_z: float
     net_velocity: float
     peak_x_velocity: float
+    peak_abs_x_velocity: float
     peak_y_velocity: float
     peak_z_velocity: float
 
@@ -67,14 +70,19 @@ class MotionMetrics:
         return max(0.0, self.peak_y_velocity)
 
     @property
-    def punch_axis_ratio(self) -> float:
-        """Return forward motion dominance over lateral and vertical drift."""
-        return abs(self.delta_z) / max(abs(self.delta_x) + abs(self.delta_y), 1e-6)
+    def outward_velocity(self) -> float:
+        """Return the strongest outward shoulder-relative wrist velocity in x-space."""
+        return max(0.0, self.peak_abs_x_velocity)
 
     @property
     def strike_axis_ratio(self) -> float:
         """Return downward motion dominance over lateral and depth drift."""
         return abs(self.delta_y) / max(abs(self.delta_x) + abs(self.delta_z), 1e-6)
+
+    @property
+    def lateral_axis_ratio(self) -> float:
+        """Return outward horizontal dominance over vertical and depth drift."""
+        return self.delta_abs_x / max(abs(self.delta_y) + abs(self.delta_z), 1e-6)
 
     def to_velocity_stats(self) -> VelocityStats:
         """Convert gesture metrics into the observability velocity schema."""
@@ -104,6 +112,7 @@ class RecoveryState:
     """Post-trigger recovery gate that prevents repeated hits from one motion."""
 
     gesture: GestureType
+    hand: str
     anchor: MotionSample
 
 
@@ -183,6 +192,9 @@ class GestureDetector:
 
     def _append_sample(self, history: HandHistory, sample: MotionSample) -> None:
         """Append a wrist sample and discard samples outside the configured time window."""
+        if history.samples and history.samples[-1].shoulder_relative != sample.shoulder_relative:
+            # Avoid mixing shoulder-relative and raw wrist coordinates in one analysis window.
+            self._reset_history_state(history)
         history.samples.append(sample)
         min_timestamp = sample.timestamp - self.config.analysis_window_seconds
         while len(history.samples) > 1 and history.samples[0].timestamp < min_timestamp:
@@ -202,12 +214,14 @@ class GestureDetector:
                 x=wrist.x,
                 y=wrist.y,
                 z=wrist.z,
+                shoulder_relative=False,
             )
         return MotionSample(
             timestamp=frame.timestamp.seconds,
             x=wrist.x - shoulder.x,
             y=wrist.y - shoulder.y,
             z=wrist.z - (shoulder.z * SHOULDER_DEPTH_COMPENSATION),
+            shoulder_relative=True,
         )
 
     def _reset_history_state(self, history: HandHistory) -> None:
@@ -248,35 +262,57 @@ class GestureDetector:
 
         if history.pending is not None and (
             timestamp.seconds - history.pending.started_at > self.config.confirmation_window_seconds
-            or not self._candidate_is_still_valid(history.pending.gesture, metrics)
+            or not self._candidate_is_still_valid(
+                history.pending.gesture,
+                metrics,
+                shoulder_relative=history.samples[-1].shoulder_relative,
+            )
         ):
             history.pending = None
 
         if history.pending is None:
-            history.pending = self._start_candidate(timestamp.seconds, metrics)
+            history.pending = self._start_candidate(
+                timestamp.seconds,
+                metrics,
+                shoulder_relative=history.samples[-1].shoulder_relative,
+            )
             if history.pending is None:
                 return None, None
             candidate = self._build_candidate(history.pending.gesture, hand, metrics)
             self._emit_candidate(timestamp, candidate, metrics)
-            if self._is_confirmed(history.pending.gesture, metrics):
+            if self._is_confirmed(
+                history.pending.gesture,
+                metrics,
+                shoulder_relative=history.samples[-1].shoulder_relative,
+            ):
                 event = self._confirm_pending(history, hand, timestamp, metrics)
                 return None, event
             return candidate, None
 
         candidate = self._build_candidate(history.pending.gesture, hand, metrics)
-        if not self._is_confirmed(history.pending.gesture, metrics):
+        if not self._is_confirmed(
+            history.pending.gesture,
+            metrics,
+            shoulder_relative=history.samples[-1].shoulder_relative,
+        ):
             return candidate, None
 
         event = self._confirm_pending(history, hand, timestamp, metrics)
         return None, event
 
-    def _start_candidate(self, timestamp: float, metrics: MotionMetrics) -> PendingGesture | None:
+    def _start_candidate(
+        self,
+        timestamp: float,
+        metrics: MotionMetrics,
+        *,
+        shoulder_relative: bool,
+    ) -> PendingGesture | None:
         """Create a pending gesture if the current window has valid onset motion."""
-        if self._meets_punch_candidate(metrics):
+        if self._meets_kick_candidate(metrics, shoulder_relative=shoulder_relative):
             return PendingGesture(
                 gesture=GestureType.KICK,
                 started_at=timestamp,
-                label="Forward punch candidate",
+                label="Outward jab candidate",
             )
         if self._meets_strike_candidate(metrics):
             return PendingGesture(
@@ -286,10 +322,16 @@ class GestureDetector:
             )
         return None
 
-    def _candidate_is_still_valid(self, gesture: GestureType, metrics: MotionMetrics) -> bool:
+    def _candidate_is_still_valid(
+        self,
+        gesture: GestureType,
+        metrics: MotionMetrics,
+        *,
+        shoulder_relative: bool,
+    ) -> bool:
         """Return whether a pending gesture still matches its expected motion direction."""
         if gesture is GestureType.KICK:
-            return self._meets_punch_candidate(metrics)
+            return self._meets_kick_candidate(metrics, shoulder_relative=shoulder_relative)
         return self._meets_strike_candidate(metrics)
 
     def _confirm_pending(
@@ -305,7 +347,7 @@ class GestureDetector:
         anchor = history.samples[-1]
         history.pending = None
         history.last_trigger_time = timestamp.seconds
-        history.recovery = RecoveryState(gesture=gesture, anchor=anchor)
+        history.recovery = RecoveryState(gesture=gesture, anchor=anchor, hand=hand)
         history.samples = deque((anchor,), maxlen=self.config.history_size)
         event = self._build_event(gesture, hand, timestamp, metrics)
         self._emit_trigger(event, metrics)
@@ -322,8 +364,8 @@ class GestureDetector:
             confidence = min(
                 1.0,
                 max(
-                    abs(metrics.delta_z) / self.config.punch_forward_delta_z,
-                    metrics.forward_velocity / self.config.min_velocity,
+                    metrics.delta_abs_x / self.config.kick_outward_delta_x,
+                    metrics.outward_velocity / self.config.min_velocity,
                 )
                 * 0.5,
             )
@@ -331,7 +373,7 @@ class GestureDetector:
                 gesture=gesture,
                 confidence=confidence,
                 hand=hand,
-                label="Forward punch candidate",
+                label="Outward jab candidate",
             )
         confidence = min(
             1.0,
@@ -359,9 +401,9 @@ class GestureDetector:
         if gesture is GestureType.KICK:
             confidence = min(
                 1.0,
-                abs(metrics.delta_z) / (self.config.punch_forward_delta_z * 1.25),
+                metrics.delta_abs_x / (self.config.kick_outward_delta_x * 1.25),
             )
-            label = "Forward punch → kick"
+            label = "Outward jab → kick"
         else:
             confidence = min(
                 1.0,
@@ -391,6 +433,7 @@ class GestureDetector:
         filtered_samples = self._smooth_samples(sample_list)
 
         deltas_x: list[float] = []
+        deltas_abs_x: list[float] = []
         deltas_y: list[float] = []
         deltas_z: list[float] = []
         for previous, current in zip(filtered_samples, filtered_samples[1:], strict=False):
@@ -398,22 +441,26 @@ class GestureDetector:
             if frame_elapsed <= 0.0:
                 continue
             deltas_x.append((current.x - previous.x) / frame_elapsed)
+            deltas_abs_x.append((abs(current.x) - abs(previous.x)) / frame_elapsed)
             deltas_y.append((current.y - previous.y) / frame_elapsed)
             deltas_z.append((current.z - previous.z) / frame_elapsed)
 
-        if not deltas_x or not deltas_y or not deltas_z:
+        if not deltas_x or not deltas_abs_x or not deltas_y or not deltas_z:
             return None
 
         delta_x = newest.x - oldest.x
+        delta_abs_x = abs(newest.x) - abs(oldest.x)
         delta_y = newest.y - oldest.y
         delta_z = newest.z - oldest.z
         return MotionMetrics(
             elapsed=elapsed,
             delta_x=delta_x,
+            delta_abs_x=delta_abs_x,
             delta_y=delta_y,
             delta_z=delta_z,
             net_velocity=l1_velocity((delta_x, delta_y, delta_z), elapsed),
             peak_x_velocity=max(deltas_x, key=abs),
+            peak_abs_x_velocity=max(deltas_abs_x, key=abs),
             peak_y_velocity=max(deltas_y, key=abs),
             peak_z_velocity=max(deltas_z, key=abs),
         )
@@ -451,8 +498,8 @@ class GestureDetector:
         partial_distance = required_distance * 0.5
         required_velocity = self.config.min_velocity * self.config.rearm_threshold_ratio
         if recovery.gesture is GestureType.KICK:
-            reverse_distance = current.z - recovery.anchor.z
-            reverse_velocity = max(0.0, metrics.peak_z_velocity)
+            reverse_distance = abs(recovery.anchor.x) - abs(current.x)
+            reverse_velocity = max(0.0, -metrics.peak_abs_x_velocity)
         else:
             reverse_distance = recovery.anchor.y - current.y
             reverse_velocity = max(0.0, -metrics.peak_y_velocity)
@@ -467,22 +514,27 @@ class GestureDetector:
     def _rearm_distance(self, gesture: GestureType) -> float:
         """Return the minimum opposite-direction travel needed after a trigger."""
         if gesture is GestureType.KICK:
-            return self.config.punch_forward_delta_z * self.config.rearm_threshold_ratio
+            return self.config.kick_outward_delta_x * self.config.rearm_threshold_ratio
         return self.config.strike_down_delta_y * self.config.rearm_threshold_ratio
 
-    def _meets_punch_candidate(self, metrics: MotionMetrics) -> bool:
-        """Return whether current motion is a viable punch candidate."""
+    def _meets_kick_candidate(
+        self,
+        metrics: MotionMetrics,
+        *,
+        shoulder_relative: bool,
+    ) -> bool:
+        """Return whether current motion is a viable outward-jab candidate."""
         return (
-            metrics.delta_z
-            <= -(self.config.punch_forward_delta_z * self.config.candidate_ratio)
-            + COMPARISON_EPSILON
+            shoulder_relative
+            and metrics.delta_abs_x
+            >= self.config.kick_outward_delta_x * self.config.candidate_ratio - COMPARISON_EPSILON
             and abs(metrics.delta_y)
-            <= self.config.punch_max_vertical_drift + COMPARISON_EPSILON
-            and metrics.forward_velocity
+            <= self.config.kick_max_vertical_drift + COMPARISON_EPSILON
+            and metrics.outward_velocity
             >= self.config.min_velocity * self.config.candidate_ratio - COMPARISON_EPSILON
             and metrics.net_velocity
             >= self.config.min_velocity * self.config.candidate_ratio - COMPARISON_EPSILON
-            and metrics.punch_axis_ratio
+            and metrics.lateral_axis_ratio
             >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
         )
 
@@ -502,16 +554,30 @@ class GestureDetector:
             >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
         )
 
-    def _is_confirmed(self, gesture: GestureType, metrics: MotionMetrics) -> bool:
+    def _is_confirmed(
+        self,
+        gesture: GestureType,
+        metrics: MotionMetrics,
+        *,
+        shoulder_relative: bool,
+    ) -> bool:
         """Return whether a pending gesture now exceeds the final trigger thresholds."""
         if gesture is GestureType.KICK:
+            # Kicks are shoulder-relative lateral jabs, which are smaller and noisier than
+            # downward strikes. Confirm the kick once the lateral candidate is present and the
+            # overall motion energy still exceeds the full detector floor.
             return (
-                metrics.delta_z <= -self.config.punch_forward_delta_z + COMPARISON_EPSILON
+                shoulder_relative
+                and metrics.delta_abs_x
+                >= (self.config.kick_outward_delta_x * self.config.candidate_ratio)
+                - COMPARISON_EPSILON
                 and abs(metrics.delta_y)
-                <= self.config.punch_max_vertical_drift + COMPARISON_EPSILON
-                and metrics.forward_velocity >= self.config.min_velocity - COMPARISON_EPSILON
+                <= self.config.kick_max_vertical_drift + COMPARISON_EPSILON
+                and metrics.outward_velocity
+                >= (self.config.min_velocity * self.config.candidate_ratio)
+                - COMPARISON_EPSILON
                 and metrics.net_velocity >= self.config.min_velocity - COMPARISON_EPSILON
-                and metrics.punch_axis_ratio
+                and metrics.lateral_axis_ratio
                 >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
             )
         return (

@@ -244,11 +244,11 @@ class TrackerConfig:
 class GestureThresholdsConfig:
     """Motion thresholds for gesture detection and confirmation."""
 
-    punch_forward_delta_z: float = 0.14
+    punch_forward_delta_z: float = 0.085
     punch_max_vertical_drift: float = 0.18
     strike_down_delta_y: float = 0.17
     strike_max_depth_drift: float = 0.18
-    min_velocity: float = 0.45
+    min_velocity: float = 0.39
     candidate_ratio: float = 0.6
     axis_dominance_ratio: float = 1.2
 
@@ -269,7 +269,7 @@ class GestureThresholdsConfig:
         )
         return cls(
             punch_forward_delta_z=reader.number(
-                "punch_forward_delta_z", default=0.14, minimum=0.0, inclusive_min=False
+                "punch_forward_delta_z", default=0.085, minimum=0.0, inclusive_min=False
             ),
             punch_max_vertical_drift=reader.number(
                 "punch_max_vertical_drift", default=0.18, minimum=0.0, inclusive_min=False
@@ -281,7 +281,7 @@ class GestureThresholdsConfig:
                 "strike_max_depth_drift", default=0.18, minimum=0.0, inclusive_min=False
             ),
             min_velocity=reader.number(
-                "min_velocity", default=0.45, minimum=0.0, inclusive_min=False
+                "min_velocity", default=0.39, minimum=0.0, inclusive_min=False
             ),
             candidate_ratio=reader.number(
                 "candidate_ratio", default=0.6, minimum=0.0, maximum=1.0, inclusive_min=False
@@ -401,12 +401,22 @@ class GestureConfig:
 
     @property
     def punch_forward_delta_z(self) -> float:
-        """Return the punch forward-distance threshold."""
+        """Return the legacy config key used for kick travel distance."""
         return self.thresholds.punch_forward_delta_z
 
     @property
     def punch_max_vertical_drift(self) -> float:
-        """Return the maximum vertical punch drift."""
+        """Return the legacy config key used for kick vertical drift."""
+        return self.thresholds.punch_max_vertical_drift
+
+    @property
+    def kick_outward_delta_x(self) -> float:
+        """Return the outward horizontal travel threshold used for kick detection."""
+        return self.thresholds.punch_forward_delta_z
+
+    @property
+    def kick_max_vertical_drift(self) -> float:
+        """Return the maximum vertical drift allowed for an outward kick jab."""
         return self.thresholds.punch_max_vertical_drift
 
     @property
