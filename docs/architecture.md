@@ -60,8 +60,9 @@ Key responsibilities:
 
 - maintain short motion histories for left and right wrists,
 - compute displacement and peak-velocity metrics,
-- detect candidate punch or strike gestures,
+- detect candidate inward-jab kicks and downward-strike snares,
 - confirm gestures within a bounded confirmation window,
+- bias ambiguous inward-jab motion toward kick so snare does not steal it,
 - enforce cooldown/debounce behavior,
 - and emit typed `GestureEvent` values with confidence scores.
 
@@ -179,8 +180,8 @@ The gesture subsystem has its own internal mini-pipeline:
 2. discard samples outside the analysis window,
 3. compute window-level motion metrics,
 4. reject hands that are inactive, invisible, or in cooldown,
-5. start a candidate when onset conditions are met,
-6. expire the candidate if the motion weakens or confirmation takes too long,
+5. start a candidate when onset conditions or kick-preference heuristics are met,
+6. expire the candidate if the motion weakens, becomes invalid, or confirmation takes too long,
 7. confirm the gesture when full threshold conditions are met,
 8. emit an event and start cooldown.
 

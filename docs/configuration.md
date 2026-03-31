@@ -53,19 +53,21 @@ tracker:
 
 gestures:
   thresholds:
-    punch_forward_delta_z: 0.2
-    punch_max_vertical_drift: 0.1
-    strike_down_delta_y: 0.26
-    strike_max_depth_drift: 0.1
-    min_velocity: 0.75
-    candidate_ratio: 0.7
-    axis_dominance_ratio: 1.7
+    punch_forward_delta_z: 0.006
+    punch_max_vertical_drift: 0.75
+    strike_down_delta_y: 0.15
+    strike_max_depth_drift: 0.18
+    min_velocity: 0.39
+    candidate_ratio: 0.6
+    axis_dominance_ratio: 1.2
   cooldowns:
     trigger_seconds: 0.2
-    analysis_window_seconds: 0.18
-    confirmation_window_seconds: 0.12
+    analysis_window_seconds: 0.24
+    confirmation_window_seconds: 0.18
   history_size: 6
   active_hand: right
+  velocity_smoothing_alpha: 0.55
+  rearm_threshold_ratio: 0.45
 
 audio:
   backend: pygame
@@ -78,6 +80,12 @@ audio:
     kick: assets/samples/kick.wav
     snare: assets/samples/snare.wav
   volume: 0.9
+
+transport:
+  backend: none
+  host: 127.0.0.1
+  port: 9000
+  source: visionbeat
 
 debug:
   overlays:
@@ -121,24 +129,28 @@ Controls wrist-history sizing, active-hand selection, timing windows, and gestur
 
 #### `gestures.thresholds`
 
-- `punch_forward_delta_z` (`float`, default `0.2`): minimum forward travel for kick detection.
-- `punch_max_vertical_drift` (`float`, default `0.1`): maximum allowed vertical drift during a punch.
-- `strike_down_delta_y` (`float`, default `0.26`): minimum downward travel for snare detection.
-- `strike_max_depth_drift` (`float`, default `0.1`): maximum allowed depth drift during a strike.
-- `min_velocity` (`float`, default `0.75`): minimum motion speed for either gesture.
-- `candidate_ratio` (`float`, default `0.7`): ratio used to create onset thresholds below full confirmation thresholds.
-- `axis_dominance_ratio` (`float`, default `1.7`): how strongly motion must stay aligned with the gesture’s primary axis.
+- `punch_forward_delta_z` (`float`, default `0.006`): legacy config key that now sets the inward side-jab travel needed for kick detection.
+- `punch_max_vertical_drift` (`float`, default `0.75`): maximum allowed vertical drift during an inward-jab kick.
+- `strike_down_delta_y` (`float`, default `0.15`): minimum downward travel for snare detection.
+- `strike_max_depth_drift` (`float`, default `0.18`): maximum allowed depth drift during a snare-style downward strike.
+- `min_velocity` (`float`, default `0.39`): shared baseline motion speed used by both gestures.
+- `candidate_ratio` (`float`, default `0.6`): ratio used to derive lower onset thresholds from the base displacement thresholds.
+- `axis_dominance_ratio` (`float`, default `1.2`): baseline dominance factor for the primary motion axis before gesture-specific relaxation is applied.
+
+`punch_forward_delta_z` and `punch_max_vertical_drift` keep their older names for backward compatibility, but they now tune a very permissive inward-lateral kick detector rather than a depth punch gesture.
 
 #### `gestures.cooldowns`
 
 - `trigger_seconds` (`float`, default `0.2`): debounce period after a confirmed hit.
-- `analysis_window_seconds` (`float`, default `0.18`): time span of wrist history considered for metrics.
-- `confirmation_window_seconds` (`float`, default `0.12`): maximum time between candidate onset and confirmation.
+- `analysis_window_seconds` (`float`, default `0.24`): time span of wrist history considered for metrics.
+- `confirmation_window_seconds` (`float`, default `0.18`): maximum time between candidate onset and confirmation.
 
 #### `gestures` root fields
 
 - `history_size` (`int`, default `6`): maximum wrist samples retained per hand.
 - `active_hand` (`left | right`, default `right`): the hand eligible to trigger events.
+- `velocity_smoothing_alpha` (`float`, default `0.55`): exponential smoothing factor applied before peak-velocity measurement.
+- `rearm_threshold_ratio` (`float`, default `0.45`): fraction of the base gesture travel required before the same hand can retrigger after recovery.
 
 ### `audio`
 
@@ -152,6 +164,15 @@ Controls sample playback.
 - `output_device_name` (`str | null`, default `null`): optional device selection hint.
 - `sample_mapping` (`map[str, str]`): mapping from sound names to file paths.
 - `volume` (`float`, default `0.9`): master playback level in `0.0..1.0`.
+
+### `transport`
+
+Controls optional external gesture-event forwarding.
+
+- `backend` (`none | udp`, default `none`): transport backend selection.
+- `host` (`str`, default `127.0.0.1`): UDP destination host when `backend = udp`.
+- `port` (`int`, default `9000`): UDP destination port.
+- `source` (`str`, default `visionbeat`): sender identifier embedded in emitted transport messages.
 
 ### `debug.overlays`
 
@@ -181,12 +202,18 @@ Do not tune gestures while tracking is unstable. First ensure the performer rema
 
 ### 2. Tune the kick gesture
 
-If forward punches do not trigger:
+If inward side-jabs do not trigger:
 
 - lower `punch_forward_delta_z` slightly,
 - or lower `min_velocity` if the performer uses softer attacks.
 
-If forward punches false-trigger during diagonal movement:
+If inward side-jabs are being stolen by snare or feel too strict:
+
+- lower `punch_forward_delta_z` slightly,
+- widen `punch_max_vertical_drift` if the player naturally drops the hand while jabbing inward,
+- or check whether the active hand is starting from too close to the body centerline.
+
+If kicks false-trigger during unrelated diagonal movement:
 
 - increase `axis_dominance_ratio`,
 - or tighten `punch_max_vertical_drift`.

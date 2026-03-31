@@ -37,7 +37,7 @@ VisionBeat emits structured log payloads for:
 A typical trigger log line looks like this:
 
 ```text
-2026-03-23 12:00:00,000 | INFO | visionbeat.observability | Forward punch → kick | {"accepted":true,"confidence":0.94,"event":"gesture_trigger",...}
+2026-03-23 12:00:00,000 | INFO | visionbeat.observability | Inward jab → kick | {"accepted":true,"confidence":0.94,"event":"gesture_trigger",...}
 ```
 
 ## Event schema
@@ -56,7 +56,7 @@ VisionBeat also records `event_kind` and `hand` to help separate candidate, conf
 ### JSONL example
 
 ```json
-{"timestamp": 12.5, "event_kind": "trigger", "gesture_type": "kick", "accepted": true, "reason": "Forward punch → kick", "velocity_stats": {"elapsed": 0.08, "delta_x": 0.01, "delta_y": 0.02, "delta_z": -0.27, "net_velocity": 3.75, "peak_x_velocity": 0.4, "peak_y_velocity": 0.6, "peak_z_velocity": -3.9}, "confidence": 0.94, "hand": "right"}
+{"timestamp": 12.5, "event_kind": "trigger", "gesture_type": "kick", "accepted": true, "reason": "Inward jab → kick", "velocity_stats": {"elapsed": 0.10, "delta_x": -0.08, "delta_y": 0.04, "delta_z": -0.01, "net_velocity": 1.30, "peak_x_velocity": -0.72, "peak_y_velocity": 0.18, "peak_z_velocity": -0.05}, "confidence": 0.94, "hand": "right"}
 ```
 
 ### CSV columns
@@ -79,8 +79,9 @@ Use the event log to answer these questions:
 1. **Was the gesture only a candidate, or did it fully trigger?**
    - Filter `event_kind == candidate` to see motions that almost triggered.
    - Filter `accepted == true` to isolate confirmed triggers.
+   - Candidate rows always carry `accepted == false`; only `event_kind == trigger` means audio should have fired.
 2. **Which threshold was most likely exceeded?**
-   - High negative `delta_z` and `peak_z_velocity` suggest a kick-like forward punch.
+   - Large inward `delta_x`/`peak_x_velocity` magnitudes suggest a kick-like inward jab.
    - High positive `delta_y` and `peak_y_velocity` suggest a snare-like downward strike.
 3. **Was a repeated hit intentionally blocked?**
    - Look for `event_kind == cooldown_suppressed` with reason `cooldown_active`.

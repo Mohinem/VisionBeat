@@ -54,7 +54,7 @@ def test_no_trigger_when_stationary(
 @pytest.mark.parametrize(
     ("sequence_name", "expected_gesture", "expected_label"),
     [
-        ("outward_jab", GestureType.KICK, "Outward jab → kick"),
+        ("inward_jab", GestureType.KICK, "Inward jab → kick"),
         ("downward_strike", GestureType.SNARE, "Downward strike → snare"),
     ],
 )
@@ -90,7 +90,7 @@ def test_detector_confirms_expected_gestures_for_synthetic_sequences(
 @pytest.mark.parametrize(
     ("travel_scale", "expected_candidate", "expected_confirmed"),
     [
-        (0.699, False, False),
+        (0.699, True, False),
         (0.7, True, True),
         (0.701, True, True),
     ],
@@ -119,9 +119,9 @@ def test_punch_threshold_boundaries_are_stable(
     detector = GestureDetector(config)
     target_delta_x = config.punch_forward_delta_z * travel_scale
     frames = [
-        tracker_output_factory(0.00, right_wrist=(0.50, 0.40, -0.05)),
-        tracker_output_factory(0.10, right_wrist=(0.50 + target_delta_x, 0.405, -0.055)),
-        tracker_output_factory(0.20, right_wrist=(0.50 + target_delta_x, 0.405, -0.055)),
+        tracker_output_factory(0.00, right_wrist=(0.70, 0.40, -0.05)),
+        tracker_output_factory(0.10, right_wrist=(0.70 - target_delta_x, 0.405, -0.055)),
+        tracker_output_factory(0.20, right_wrist=(0.70 - target_delta_x, 0.405, -0.055)),
     ]
 
     first = detector.update(frames[0])
@@ -207,12 +207,12 @@ def test_duplicate_trigger_regression_respects_cooldown_and_logs_suppression(
         ),
         observer=observer,
     )
-    frames = sequence_to_frames(motion_sequences["outward_jab"])
+    frames = sequence_to_frames(motion_sequences["inward_jab"])
     repeated_frames = frames + sequence_to_frames(
         (
-            (0.18, (0.53, 0.40, -0.08)),
-            (0.24, (0.62, 0.41, -0.09)),
-            (0.28, (0.71, 0.42, -0.10)),
+            (0.18, (0.62, 0.40, -0.08)),
+            (0.24, (0.54, 0.41, -0.09)),
+            (0.28, (0.47, 0.42, -0.10)),
         )
     )
 
@@ -234,12 +234,12 @@ def test_recovery_gate_blocks_retrigger_until_hand_resets(tracker_output_factory
         )
     )
     frames = [
-        tracker_output_factory(0.00, right_wrist=(0.50, 0.40, -0.08)),
-        tracker_output_factory(0.05, right_wrist=(0.63, 0.41, -0.09)),
-        tracker_output_factory(0.10, right_wrist=(0.76, 0.41, -0.10)),
-        tracker_output_factory(0.18, right_wrist=(0.77, 0.41, -0.10)),
-        tracker_output_factory(0.26, right_wrist=(0.79, 0.42, -0.11)),
-        tracker_output_factory(0.34, right_wrist=(0.81, 0.42, -0.11)),
+        tracker_output_factory(0.00, right_wrist=(0.70, 0.40, -0.08)),
+        tracker_output_factory(0.05, right_wrist=(0.58, 0.41, -0.09)),
+        tracker_output_factory(0.10, right_wrist=(0.47, 0.41, -0.10)),
+        tracker_output_factory(0.18, right_wrist=(0.46, 0.41, -0.10)),
+        tracker_output_factory(0.26, right_wrist=(0.45, 0.42, -0.11)),
+        tracker_output_factory(0.34, right_wrist=(0.44, 0.42, -0.11)),
     ]
 
     events = feed_frames(detector, frames)
@@ -284,7 +284,7 @@ def test_shoulder_relative_motion_reduces_body_sway_false_positives(
     assert detector.candidates == ()
 
 
-def test_outward_jab_still_confirms_with_moderate_shoulder_followthrough(
+def test_inward_jab_still_confirms_with_moderate_shoulder_followthrough(
     tracker_output_factory,
 ) -> None:
     detector = GestureDetector(
@@ -299,17 +299,17 @@ def test_outward_jab_still_confirms_with_moderate_shoulder_followthrough(
     frames = [
         tracker_output_factory(
             0.00,
-            right_wrist=(0.60, 0.40, -0.08),
+            right_wrist=(0.70, 0.40, -0.08),
             right_shoulder=(0.50, 0.20, -0.02),
         ),
         tracker_output_factory(
             0.06,
-            right_wrist=(0.70, 0.41, -0.09),
-            right_shoulder=(0.55, 0.21, -0.03),
+            right_wrist=(0.63, 0.41, -0.09),
+            right_shoulder=(0.54, 0.21, -0.03),
         ),
         tracker_output_factory(
             0.12,
-            right_wrist=(0.80, 0.41, -0.10),
+            right_wrist=(0.59, 0.41, -0.10),
             right_shoulder=(0.56, 0.22, -0.04),
         ),
     ]
@@ -341,17 +341,17 @@ def test_shoulder_visibility_mode_change_clears_pending_kick_history(
     frames = [
         tracker_output_factory(
             0.00,
-            right_wrist=(0.60, 0.40, -0.08),
+            right_wrist=(0.70, 0.40, -0.08),
             right_shoulder=(0.50, 0.20, -0.02),
         ),
         tracker_output_factory(
             0.05,
-            right_wrist=(0.68, 0.41, -0.09),
+            right_wrist=(0.61, 0.41, -0.09),
             right_shoulder=(0.505, 0.205, -0.06),
         ),
         tracker_output_factory(
             0.10,
-            right_wrist=(0.70, 0.41, -0.10),
+            right_wrist=(0.58, 0.41, -0.10),
             right_shoulder=(0.505, 0.205, -0.06),
             right_shoulder_visibility=0.1,
         ),
@@ -489,7 +489,7 @@ def test_cooldown_remaining_tracks_last_trigger(
             )
         )
     )
-    events = feed_frames(detector, sequence_to_frames(motion_sequences["outward_jab"]))
+    events = feed_frames(detector, sequence_to_frames(motion_sequences["inward_jab"]))
 
     assert len(events) == 1
     trigger_time = events[0].timestamp.seconds
@@ -539,12 +539,18 @@ def test_compute_metrics_handles_short_or_non_monotonic_histories(
 
 def test_epsilon_inclusive_threshold_logic_at_exact_boundary() -> None:
     detector = GestureDetector(GestureConfig())
+    kick_threshold = detector.config.kick_outward_delta_x * detector.config.candidate_ratio
     metrics = detector._compute_metrics(
         [
-            MotionSample(timestamp=0.0, x=0.5, y=0.4, z=-0.1),
             MotionSample(
-                timestamp=0.1,
-                x=0.5 + detector.config.kick_outward_delta_x,
+                timestamp=0.0,
+                x=0.5 + kick_threshold,
+                y=0.4,
+                z=-0.1,
+            ),
+            MotionSample(
+                timestamp=0.05,
+                x=0.5,
                 y=0.4 + COMPARISON_EPSILON / 2,
                 z=-0.1 + COMPARISON_EPSILON / 2,
             ),
@@ -552,27 +558,121 @@ def test_epsilon_inclusive_threshold_logic_at_exact_boundary() -> None:
     )
 
     assert metrics is not None
-    assert detector._is_confirmed(GestureType.KICK, metrics, shoulder_relative=True) is True
-    assert detector._meets_kick_candidate(metrics, shoulder_relative=True) is True
+    assert detector._is_confirmed("right", GestureType.KICK, metrics, shoulder_relative=True) is True
+    assert detector._meets_kick_candidate("right", metrics, shoulder_relative=True) is True
 
 
-def test_logged_outward_jab_regression_now_confirms_as_kick() -> None:
+def test_logged_inward_jab_regression_now_confirms_as_kick() -> None:
     detector = GestureDetector(GestureConfig())
     metrics = MotionMetrics(
         elapsed=0.12501151600008598,
         delta_x=-0.053355634212493896,
-        delta_abs_x=0.053355634212493896,
+        delta_abs_x=-0.053355634212493896,
         delta_y=0.04259753227233887,
         delta_z=-0.0003672957420348677,
         net_velocity=0.7704927138616684,
         peak_x_velocity=-0.23474316411658805,
-        peak_abs_x_velocity=0.23474316411658805,
+        peak_abs_x_velocity=-0.23474316411658805,
         peak_y_velocity=0.18741187611683918,
         peak_z_velocity=-0.0016159523904902089,
     )
 
-    assert detector._meets_kick_candidate(metrics, shoulder_relative=True) is True
-    assert detector._is_confirmed(GestureType.KICK, metrics, shoulder_relative=True) is True
+    assert detector._meets_kick_candidate("right", metrics, shoulder_relative=True) is True
+    assert detector._is_confirmed("right", GestureType.KICK, metrics, shoulder_relative=True) is True
+
+
+def test_inward_jab_shape_does_not_match_snare() -> None:
+    detector = GestureDetector(
+        GestureConfig(
+            thresholds=GestureThresholdsConfig(
+                punch_forward_delta_z=0.006,
+                punch_max_vertical_drift=0.75,
+                strike_down_delta_y=0.03,
+                min_velocity=0.3,
+                candidate_ratio=0.6,
+                axis_dominance_ratio=1.0,
+            )
+        )
+    )
+    metrics = MotionMetrics(
+        elapsed=0.10,
+        delta_x=-0.06,
+        delta_abs_x=-0.06,
+        delta_y=0.04,
+        delta_z=0.003,
+        net_velocity=0.80,
+        peak_x_velocity=-0.50,
+        peak_abs_x_velocity=-0.50,
+        peak_y_velocity=0.35,
+        peak_z_velocity=0.02,
+    )
+
+    assert detector._meets_kick_candidate("right", metrics, shoulder_relative=True) is True
+    assert detector._meets_strike_candidate("right", metrics, shoulder_relative=True) is False
+
+
+def test_diagonal_inward_jab_prefers_kick_over_snare() -> None:
+    detector = GestureDetector(GestureConfig())
+    metrics = MotionMetrics(
+        elapsed=0.10,
+        delta_x=-0.08,
+        delta_abs_x=-0.08,
+        delta_y=0.16,
+        delta_z=0.003,
+        net_velocity=1.20,
+        peak_x_velocity=-0.70,
+        peak_abs_x_velocity=-0.70,
+        peak_y_velocity=0.65,
+        peak_z_velocity=0.02,
+    )
+
+    assert detector._meets_kick_candidate("right", metrics, shoulder_relative=True) is True
+    assert detector._is_confirmed("right", GestureType.KICK, metrics, shoulder_relative=True) is True
+    assert detector._meets_strike_candidate("right", metrics, shoulder_relative=True) is False
+    assert detector._is_confirmed("right", GestureType.SNARE, metrics, shoulder_relative=True) is False
+
+
+def test_raw_inward_jab_confirms_as_kick_when_shoulder_visibility_is_low(
+    tracker_output_factory,
+) -> None:
+    detector = GestureDetector(
+        GestureConfig(
+            cooldowns=GestureCooldownsConfig(
+                analysis_window_seconds=0.2,
+                confirmation_window_seconds=0.15,
+                trigger_seconds=0.05,
+            )
+        )
+    )
+    frames = [
+        tracker_output_factory(0.00, right_wrist=(0.70, 0.40, -0.08), right_shoulder_visibility=0.1),
+        tracker_output_factory(0.05, right_wrist=(0.66, 0.41, -0.09), right_shoulder_visibility=0.1),
+        tracker_output_factory(0.10, right_wrist=(0.63, 0.41, -0.10), right_shoulder_visibility=0.1),
+    ]
+
+    events = feed_frames(detector, frames)
+
+    assert [event.gesture for event in events] == [GestureType.KICK]
+
+
+def test_kick_confirmation_uses_relaxed_velocity_floor() -> None:
+    detector = GestureDetector(GestureConfig())
+    relaxed_velocity = detector.config.min_velocity * 0.08
+    metrics = MotionMetrics(
+        elapsed=0.10,
+        delta_x=-0.03,
+        delta_abs_x=-0.03,
+        delta_y=0.01,
+        delta_z=0.005,
+        net_velocity=relaxed_velocity,
+        peak_x_velocity=-relaxed_velocity,
+        peak_abs_x_velocity=-relaxed_velocity,
+        peak_y_velocity=0.10,
+        peak_z_velocity=0.01,
+    )
+
+    assert detector._meets_kick_candidate("right", metrics, shoulder_relative=True) is True
+    assert detector._is_confirmed("right", GestureType.KICK, metrics, shoulder_relative=True) is True
 
 
 def test_observer_receives_candidate_and_trigger_events(
@@ -596,7 +696,7 @@ def test_observer_receives_candidate_and_trigger_events(
         observer=observer,
     )
 
-    events = feed_frames(detector, sequence_to_frames(motion_sequences["outward_jab"]))
+    events = feed_frames(detector, sequence_to_frames(motion_sequences["inward_jab"]))
 
     assert len(events) == 1
     assert len(observer.candidates) == 1

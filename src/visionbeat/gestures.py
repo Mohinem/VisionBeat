@@ -75,14 +75,19 @@ class MotionMetrics:
         return max(0.0, self.peak_abs_x_velocity)
 
     @property
+    def inward_velocity(self) -> float:
+        """Return the strongest inward shoulder-relative wrist velocity in x-space."""
+        return max(0.0, -self.peak_abs_x_velocity)
+
+    @property
     def strike_axis_ratio(self) -> float:
         """Return downward motion dominance over lateral and depth drift."""
         return abs(self.delta_y) / max(abs(self.delta_x) + abs(self.delta_z), 1e-6)
 
     @property
     def lateral_axis_ratio(self) -> float:
-        """Return outward horizontal dominance over vertical and depth drift."""
-        return self.delta_abs_x / max(abs(self.delta_y) + abs(self.delta_z), 1e-6)
+        """Return horizontal dominance magnitude over vertical and depth drift."""
+        return abs(self.delta_abs_x) / max(abs(self.delta_y) + abs(self.delta_z), 1e-6)
 
     def to_velocity_stats(self) -> VelocityStats:
         """Convert gesture metrics into the observability velocity schema."""
@@ -128,6 +133,8 @@ class HandHistory:
 
 COMPARISON_EPSILON = 1e-9
 SHOULDER_DEPTH_COMPENSATION = 0.7
+KICK_VELOCITY_RELAXATION_RATIO = 0.08
+KICK_STRIKE_VETO_RATIO = 0.75
 
 
 class GestureDetector:
@@ -263,6 +270,7 @@ class GestureDetector:
         if history.pending is not None and (
             timestamp.seconds - history.pending.started_at > self.config.confirmation_window_seconds
             or not self._candidate_is_still_valid(
+                hand,
                 history.pending.gesture,
                 metrics,
                 shoulder_relative=history.samples[-1].shoulder_relative,
@@ -272,6 +280,7 @@ class GestureDetector:
 
         if history.pending is None:
             history.pending = self._start_candidate(
+                hand,
                 timestamp.seconds,
                 metrics,
                 shoulder_relative=history.samples[-1].shoulder_relative,
@@ -281,6 +290,7 @@ class GestureDetector:
             candidate = self._build_candidate(history.pending.gesture, hand, metrics)
             self._emit_candidate(timestamp, candidate, metrics)
             if self._is_confirmed(
+                hand,
                 history.pending.gesture,
                 metrics,
                 shoulder_relative=history.samples[-1].shoulder_relative,
@@ -291,6 +301,7 @@ class GestureDetector:
 
         candidate = self._build_candidate(history.pending.gesture, hand, metrics)
         if not self._is_confirmed(
+            hand,
             history.pending.gesture,
             metrics,
             shoulder_relative=history.samples[-1].shoulder_relative,
@@ -302,19 +313,22 @@ class GestureDetector:
 
     def _start_candidate(
         self,
+        hand: str,
         timestamp: float,
         metrics: MotionMetrics,
         *,
         shoulder_relative: bool,
     ) -> PendingGesture | None:
         """Create a pending gesture if the current window has valid onset motion."""
-        if self._meets_kick_candidate(metrics, shoulder_relative=shoulder_relative):
+        if self._meets_kick_candidate(hand, metrics, shoulder_relative=shoulder_relative) or (
+            self._prefer_kick_over_strike(hand, metrics, shoulder_relative=shoulder_relative)
+        ):
             return PendingGesture(
                 gesture=GestureType.KICK,
                 started_at=timestamp,
-                label="Outward jab candidate",
+                label="Inward jab candidate",
             )
-        if self._meets_strike_candidate(metrics):
+        if self._meets_strike_candidate(hand, metrics, shoulder_relative=shoulder_relative):
             return PendingGesture(
                 gesture=GestureType.SNARE,
                 started_at=timestamp,
@@ -324,6 +338,7 @@ class GestureDetector:
 
     def _candidate_is_still_valid(
         self,
+        hand: str,
         gesture: GestureType,
         metrics: MotionMetrics,
         *,
@@ -331,8 +346,10 @@ class GestureDetector:
     ) -> bool:
         """Return whether a pending gesture still matches its expected motion direction."""
         if gesture is GestureType.KICK:
-            return self._meets_kick_candidate(metrics, shoulder_relative=shoulder_relative)
-        return self._meets_strike_candidate(metrics)
+            return self._meets_kick_candidate(hand, metrics, shoulder_relative=shoulder_relative) or (
+                self._prefer_kick_over_strike(hand, metrics, shoulder_relative=shoulder_relative)
+            )
+        return self._meets_strike_candidate(hand, metrics, shoulder_relative=shoulder_relative)
 
     def _confirm_pending(
         self,
@@ -364,8 +381,8 @@ class GestureDetector:
             confidence = min(
                 1.0,
                 max(
-                    metrics.delta_abs_x / self.config.kick_outward_delta_x,
-                    metrics.outward_velocity / self.config.min_velocity,
+                    max(0.0, -metrics.delta_abs_x) / self.config.kick_outward_delta_x,
+                    metrics.inward_velocity / self.config.min_velocity,
                 )
                 * 0.5,
             )
@@ -373,7 +390,7 @@ class GestureDetector:
                 gesture=gesture,
                 confidence=confidence,
                 hand=hand,
-                label="Outward jab candidate",
+                label="Inward jab candidate",
             )
         confidence = min(
             1.0,
@@ -401,9 +418,9 @@ class GestureDetector:
         if gesture is GestureType.KICK:
             confidence = min(
                 1.0,
-                metrics.delta_abs_x / (self.config.kick_outward_delta_x * 1.25),
+                max(0.0, -metrics.delta_abs_x) / (self.config.kick_outward_delta_x * 1.25),
             )
-            label = "Outward jab → kick"
+            label = "Inward jab → kick"
         else:
             confidence = min(
                 1.0,
@@ -498,8 +515,8 @@ class GestureDetector:
         partial_distance = required_distance * 0.5
         required_velocity = self.config.min_velocity * self.config.rearm_threshold_ratio
         if recovery.gesture is GestureType.KICK:
-            reverse_distance = abs(recovery.anchor.x) - abs(current.x)
-            reverse_velocity = max(0.0, -metrics.peak_abs_x_velocity)
+            reverse_distance = self._kick_recovery_distance(recovery, current)
+            reverse_velocity = self._kick_recovery_velocity(recovery, metrics)
         else:
             reverse_distance = recovery.anchor.y - current.y
             reverse_velocity = max(0.0, -metrics.peak_y_velocity)
@@ -517,31 +534,138 @@ class GestureDetector:
             return self.config.kick_outward_delta_x * self.config.rearm_threshold_ratio
         return self.config.strike_down_delta_y * self.config.rearm_threshold_ratio
 
-    def _meets_kick_candidate(
+    def _kick_axis_ratio_threshold(self) -> float:
+        """Return the relaxed axis-dominance threshold used for lateral kicks."""
+        return max(0.4, self.config.axis_dominance_ratio * self.config.candidate_ratio * 0.5)
+
+    def _kick_distance_threshold(self) -> float:
+        """Return the minimum inward travel needed to confirm a kick."""
+        return self.config.kick_outward_delta_x * self.config.candidate_ratio
+
+    def _kick_velocity_floor(self) -> float:
+        """Return the relaxed minimum speed required for kick detection."""
+        return self.config.min_velocity * KICK_VELOCITY_RELAXATION_RATIO
+
+    def _kick_inward_displacement(
         self,
+        hand: str,
+        metrics: MotionMetrics,
+        *,
+        shoulder_relative: bool,
+    ) -> float:
+        """Return inward lateral travel for the active hand."""
+        if shoulder_relative:
+            return max(0.0, -metrics.delta_abs_x)
+        if hand == "right":
+            return max(0.0, -metrics.delta_x)
+        return max(0.0, metrics.delta_x)
+
+    def _kick_inward_velocity(
+        self,
+        hand: str,
+        metrics: MotionMetrics,
+        *,
+        shoulder_relative: bool,
+    ) -> float:
+        """Return inward lateral velocity for the active hand."""
+        if shoulder_relative:
+            return metrics.inward_velocity
+        if hand == "right":
+            return max(0.0, -metrics.peak_x_velocity)
+        return max(0.0, metrics.peak_x_velocity)
+
+    def _kick_recovery_distance(self, recovery: RecoveryState, current: MotionSample) -> float:
+        """Return outward reset distance after an inward-jab kick."""
+        if recovery.anchor.shoulder_relative:
+            return abs(current.x) - abs(recovery.anchor.x)
+        if recovery.hand == "right":
+            return current.x - recovery.anchor.x
+        return recovery.anchor.x - current.x
+
+    def _kick_recovery_velocity(
+        self,
+        recovery: RecoveryState,
+        metrics: MotionMetrics,
+    ) -> float:
+        """Return outward reset velocity after an inward-jab kick."""
+        if recovery.anchor.shoulder_relative:
+            return max(0.0, metrics.peak_abs_x_velocity)
+        if recovery.hand == "right":
+            return max(0.0, metrics.peak_x_velocity)
+        return max(0.0, -metrics.peak_x_velocity)
+
+    def _prefer_kick_over_strike(
+        self,
+        hand: str,
         metrics: MotionMetrics,
         *,
         shoulder_relative: bool,
     ) -> bool:
-        """Return whether current motion is a viable outward-jab candidate."""
+        """Return whether ambiguous motion should stay on the kick path, not snare."""
+        inward_displacement = self._kick_inward_displacement(
+            hand,
+            metrics,
+            shoulder_relative=shoulder_relative,
+        )
+        inward_velocity = self._kick_inward_velocity(
+            hand,
+            metrics,
+            shoulder_relative=shoulder_relative,
+        )
+        kick_bias_distance = self._kick_distance_threshold() * KICK_STRIKE_VETO_RATIO
+        kick_bias_velocity = self._kick_velocity_floor() * KICK_STRIKE_VETO_RATIO
+        kick_bias_axis_ratio = max(0.3, self._kick_axis_ratio_threshold() * KICK_STRIKE_VETO_RATIO)
         return (
-            shoulder_relative
-            and metrics.delta_abs_x
-            >= self.config.kick_outward_delta_x * self.config.candidate_ratio - COMPARISON_EPSILON
-            and abs(metrics.delta_y)
-            <= self.config.kick_max_vertical_drift + COMPARISON_EPSILON
-            and metrics.outward_velocity
-            >= self.config.min_velocity * self.config.candidate_ratio - COMPARISON_EPSILON
-            and metrics.net_velocity
-            >= self.config.min_velocity * self.config.candidate_ratio - COMPARISON_EPSILON
-            and metrics.lateral_axis_ratio
-            >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
+            inward_displacement >= kick_bias_distance - COMPARISON_EPSILON
+            and abs(metrics.delta_y) <= self.config.kick_max_vertical_drift + COMPARISON_EPSILON
+            and inward_velocity >= kick_bias_velocity - COMPARISON_EPSILON
+            and metrics.net_velocity >= kick_bias_velocity - COMPARISON_EPSILON
+            and metrics.lateral_axis_ratio >= kick_bias_axis_ratio - COMPARISON_EPSILON
         )
 
-    def _meets_strike_candidate(self, metrics: MotionMetrics) -> bool:
+    def _meets_kick_candidate(
+        self,
+        hand: str,
+        metrics: MotionMetrics,
+        *,
+        shoulder_relative: bool,
+    ) -> bool:
+        """Return whether current motion is a viable inward-jab kick candidate."""
+        inward_displacement = self._kick_inward_displacement(
+            hand,
+            metrics,
+            shoulder_relative=shoulder_relative,
+        )
+        inward_velocity = self._kick_inward_velocity(
+            hand,
+            metrics,
+            shoulder_relative=shoulder_relative,
+        )
+        kick_velocity_floor = self._kick_velocity_floor()
+        return (
+            inward_displacement
+            >= self._kick_distance_threshold() - COMPARISON_EPSILON
+            and abs(metrics.delta_y)
+            <= self.config.kick_max_vertical_drift + COMPARISON_EPSILON
+            and inward_velocity
+            >= kick_velocity_floor - COMPARISON_EPSILON
+            and metrics.net_velocity
+            >= kick_velocity_floor - COMPARISON_EPSILON
+            and metrics.lateral_axis_ratio
+            >= self._kick_axis_ratio_threshold() - COMPARISON_EPSILON
+        )
+
+    def _meets_strike_candidate(
+        self,
+        hand: str,
+        metrics: MotionMetrics,
+        *,
+        shoulder_relative: bool,
+    ) -> bool:
         """Return whether current motion is a viable strike candidate."""
         return (
-            metrics.delta_y
+            not self._prefer_kick_over_strike(hand, metrics, shoulder_relative=shoulder_relative)
+            and metrics.delta_y
             >= self.config.strike_down_delta_y * self.config.candidate_ratio
             - COMPARISON_EPSILON
             and abs(metrics.delta_z)
@@ -556,6 +680,7 @@ class GestureDetector:
 
     def _is_confirmed(
         self,
+        hand: str,
         gesture: GestureType,
         metrics: MotionMetrics,
         *,
@@ -563,25 +688,30 @@ class GestureDetector:
     ) -> bool:
         """Return whether a pending gesture now exceeds the final trigger thresholds."""
         if gesture is GestureType.KICK:
-            # Kicks are shoulder-relative lateral jabs, which are smaller and noisier than
-            # downward strikes. Confirm the kick once the lateral candidate is present and the
-            # overall motion energy still exceeds the full detector floor.
+            inward_displacement = self._kick_inward_displacement(
+                hand,
+                metrics,
+                shoulder_relative=shoulder_relative,
+            )
+            inward_velocity = self._kick_inward_velocity(
+                hand,
+                metrics,
+                shoulder_relative=shoulder_relative,
+            )
+            kick_velocity_floor = self._kick_velocity_floor()
+            # Kicks are intentionally permissive so shorter inward side-jabs still register.
             return (
-                shoulder_relative
-                and metrics.delta_abs_x
-                >= (self.config.kick_outward_delta_x * self.config.candidate_ratio)
-                - COMPARISON_EPSILON
+                inward_displacement >= self._kick_distance_threshold() - COMPARISON_EPSILON
                 and abs(metrics.delta_y)
                 <= self.config.kick_max_vertical_drift + COMPARISON_EPSILON
-                and metrics.outward_velocity
-                >= (self.config.min_velocity * self.config.candidate_ratio)
-                - COMPARISON_EPSILON
-                and metrics.net_velocity >= self.config.min_velocity - COMPARISON_EPSILON
+                and inward_velocity >= kick_velocity_floor - COMPARISON_EPSILON
+                and metrics.net_velocity >= kick_velocity_floor - COMPARISON_EPSILON
                 and metrics.lateral_axis_ratio
-                >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
+                >= self._kick_axis_ratio_threshold() - COMPARISON_EPSILON
             )
         return (
-            metrics.delta_y >= self.config.strike_down_delta_y - COMPARISON_EPSILON
+            not self._prefer_kick_over_strike(hand, metrics, shoulder_relative=shoulder_relative)
+            and metrics.delta_y >= self.config.strike_down_delta_y - COMPARISON_EPSILON
             and abs(metrics.delta_z) <= self.config.strike_max_depth_drift + COMPARISON_EPSILON
             and metrics.downward_velocity >= self.config.min_velocity - COMPARISON_EPSILON
             and metrics.net_velocity >= self.config.min_velocity - COMPARISON_EPSILON

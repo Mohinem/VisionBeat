@@ -19,12 +19,13 @@ This guide is optimized for a **2-minute live demo** during a research presentat
 
 ## Performing gestures for reliable detection
 
-### Forward punch (kick)
+### Inward side-jab (kick)
 
 - Use the configured active hand.
-- Move the wrist **forward toward the camera** with clear acceleration.
-- Keep side-to-side drift minimal.
-- Return to a neutral pose between hits when possible.
+- Start with the wrist slightly outside the active-side shoulder line.
+- Snap the wrist **inward toward the sternum / centerline** with clear acceleration.
+- A little downward drift is fine; the motion should still feel more sideways-inward than purely downward.
+- Move the hand back outward between hits so the detector can re-arm cleanly.
 
 ### Downward strike (snare)
 
@@ -47,6 +48,7 @@ This guide is optimized for a **2-minute live demo** during a research presentat
 
 - **Gestures visible, but few triggers**
   - Use larger, cleaner motion on the primary axis.
+  - For kick, move inward across the body rather than toward the camera.
   - Try `--sensitivity expressive` for demos.
   - Confirm the configured active hand matches your performing hand.
 
@@ -87,7 +89,7 @@ Keyboard shortcuts while running:
 
 ### 0:45 - 1:15 (Gesture mapping)
 
-- Perform 3–4 clear forward punches (kick).
+- Perform 3–4 clear inward side-jabs (kick).
 - Perform 3–4 clear downward strikes (snare).
 - Briefly state the mapping aloud as you perform.
 

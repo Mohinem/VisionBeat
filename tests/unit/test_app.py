@@ -205,14 +205,14 @@ def test_runtime_orchestrates_tracking_detection_audio_and_overlay() -> None:
         gesture=GestureType.KICK,
         confidence=0.72,
         hand="right",
-        label="Forward punch candidate",
+        label="Inward jab candidate",
     )
     event = GestureEvent(
         gesture=GestureType.KICK,
         confidence=0.91,
         hand="right",
         timestamp=FrameTimestamp(seconds=1.0),
-        label="Forward punch → kick",
+        label="Inward jab → kick",
     )
     detector = FakeDetector(
         events_by_frame=[[event]],

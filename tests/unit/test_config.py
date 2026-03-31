@@ -30,8 +30,9 @@ def test_load_config_supports_nested_yaml_sections() -> None:
 
     assert isinstance(config, AppConfig)
     assert config.camera.window_name == "VisionBeat"
-    assert config.gestures.thresholds.punch_forward_delta_z == pytest.approx(0.085)
-    assert config.gestures.thresholds.strike_down_delta_y == pytest.approx(0.17)
+    assert config.gestures.thresholds.punch_forward_delta_z == pytest.approx(0.006)
+    assert config.gestures.thresholds.punch_max_vertical_drift == pytest.approx(0.75)
+    assert config.gestures.thresholds.strike_down_delta_y == pytest.approx(0.15)
     assert config.gestures.thresholds.axis_dominance_ratio == pytest.approx(1.2)
     assert config.gestures.cooldowns.trigger_seconds == pytest.approx(0.2)
     assert config.gestures.cooldowns.analysis_window_seconds == pytest.approx(0.24)

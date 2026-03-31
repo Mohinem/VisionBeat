@@ -43,7 +43,7 @@ All UDP packets contain one JSON object:
   "confidence": 0.93,
   "intensity": 0.93,
   "hand": "right",
-  "label": "Forward punch → kick",
+  "label": "Inward jab → kick",
   "timestamp_seconds": 12.5,
   "source": "visionbeat"
 }

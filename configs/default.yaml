@@ -14,11 +14,11 @@ tracker:
 
 gestures:
   thresholds:
-    # Looser defaults for live demo use with a single webcam and natural arm motion.
-    # This legacy-named key now controls the outward-jab travel needed for kick detection.
-    punch_forward_delta_z: 0.085
-    punch_max_vertical_drift: 0.18
-    strike_down_delta_y: 0.17
+    # Ultra-permissive defaults for live demo use with natural inward side-jab kick motions.
+    # This legacy-named key now controls the inward-jab travel needed for kick detection.
+    punch_forward_delta_z: 0.006
+    punch_max_vertical_drift: 0.75
+    strike_down_delta_y: 0.15
     strike_max_depth_drift: 0.18
     min_velocity: 0.39
     candidate_ratio: 0.6

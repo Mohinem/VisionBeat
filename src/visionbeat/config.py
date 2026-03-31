@@ -244,9 +244,9 @@ class TrackerConfig:
 class GestureThresholdsConfig:
     """Motion thresholds for gesture detection and confirmation."""
 
-    punch_forward_delta_z: float = 0.085
-    punch_max_vertical_drift: float = 0.18
-    strike_down_delta_y: float = 0.17
+    punch_forward_delta_z: float = 0.006
+    punch_max_vertical_drift: float = 0.75
+    strike_down_delta_y: float = 0.15
     strike_max_depth_drift: float = 0.18
     min_velocity: float = 0.39
     candidate_ratio: float = 0.6
@@ -269,13 +269,13 @@ class GestureThresholdsConfig:
         )
         return cls(
             punch_forward_delta_z=reader.number(
-                "punch_forward_delta_z", default=0.085, minimum=0.0, inclusive_min=False
+                "punch_forward_delta_z", default=0.006, minimum=0.0, inclusive_min=False
             ),
             punch_max_vertical_drift=reader.number(
-                "punch_max_vertical_drift", default=0.18, minimum=0.0, inclusive_min=False
+                "punch_max_vertical_drift", default=0.75, minimum=0.0, inclusive_min=False
             ),
             strike_down_delta_y=reader.number(
-                "strike_down_delta_y", default=0.17, minimum=0.0, inclusive_min=False
+                "strike_down_delta_y", default=0.15, minimum=0.0, inclusive_min=False
             ),
             strike_max_depth_drift=reader.number(
                 "strike_max_depth_drift", default=0.18, minimum=0.0, inclusive_min=False
@@ -411,12 +411,12 @@ class GestureConfig:
 
     @property
     def kick_outward_delta_x(self) -> float:
-        """Return the outward horizontal travel threshold used for kick detection."""
+        """Return the inward horizontal travel threshold used for kick detection."""
         return self.thresholds.punch_forward_delta_z
 
     @property
     def kick_max_vertical_drift(self) -> float:
-        """Return the maximum vertical drift allowed for an outward kick jab."""
+        """Return the maximum vertical drift allowed for an inward-jab kick."""
         return self.thresholds.punch_max_vertical_drift
 
     @property

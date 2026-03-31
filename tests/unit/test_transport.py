@@ -24,7 +24,7 @@ def make_event() -> GestureEvent:
         confidence=0.93,
         hand="right",
         timestamp=FrameTimestamp(seconds=12.5),
-        label="Forward punch → kick",
+        label="Inward jab → kick",
     )
 
 

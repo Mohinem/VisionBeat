@@ -13,9 +13,9 @@ min_tracking_confidence = 0.55
 enable_segmentation = false
 
 [gestures.thresholds]
-punch_forward_delta_z = 0.2
-punch_max_vertical_drift = 0.1
-strike_down_delta_y = 0.26
+punch_forward_delta_z = 0.006
+punch_max_vertical_drift = 0.75
+strike_down_delta_y = 0.15
 strike_max_depth_drift = 0.1
 min_velocity = 0.75
 candidate_ratio = 0.7
