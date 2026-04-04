@@ -19,7 +19,7 @@ from visionbeat.models import (
 )
 from visionbeat.observability import ObservabilityRecorder, build_observability_recorder
 from visionbeat.overlay import OverlayRenderer
-from visionbeat.tracking import PoseTracker
+from visionbeat.pose_provider import PoseProvider, create_pose_provider
 from visionbeat.transport import (
     GestureEventTransport,
     NullGestureEventTransport,
@@ -91,7 +91,7 @@ class VisionBeatRuntime:
 
     config: AppConfig
     camera: CameraSource
-    tracker: PoseTracker
+    tracker: PoseProvider
     detector: GestureDetector
     audio: AudioEngine
     overlay: OverlayRenderer
@@ -285,7 +285,7 @@ class VisionBeatApp:
     overlay_toggle_key: str = "o"
     debug_toggle_key: str = "d"
     camera: CameraSource = field(init=False)
-    tracker: PoseTracker = field(init=False)
+    tracker: PoseProvider = field(init=False)
     detector: GestureDetector = field(init=False)
     recorder: ObservabilityRecorder = field(init=False)
     audio: AudioEngine = field(init=False)
@@ -302,7 +302,7 @@ class VisionBeatApp:
             raise ValueError("debug_toggle_key must be a single character.")
         self.recorder = build_observability_recorder(self.config.logging)
         self.camera = CameraSource(self.config.camera, recorder=self.recorder)
-        self.tracker = PoseTracker(self.config.tracker)
+        self.tracker = create_pose_provider(self.config.tracker)
         self.detector = GestureDetector(self.config.gestures, observer=self.recorder)
         self.audio = create_audio_engine(self.config.audio)
         if self.config.transport.backend == "udp":
@@ -321,6 +321,7 @@ class VisionBeatApp:
                 "camera_resolution": f"{self.config.camera.width}x{self.config.camera.height}",
                 "camera_fps": self.config.camera.fps,
                 "active_hand": self.config.gestures.active_hand,
+                "pose_backend": self.config.tracker.backend,
                 "audio_status": self._audio_status(),
                 "event_log_format": self.config.logging.event_log_format,
                 "event_log_path": self.config.logging.event_log_path,

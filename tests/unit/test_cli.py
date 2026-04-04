@@ -7,12 +7,22 @@ from visionbeat.__main__ import build_config, parse_args
 
 def test_parse_args_supports_default_run_mode() -> None:
     args = parse_args(
-        ["--config", "configs/default.yaml", "--camera-index", "2", "--sensitivity", "expressive"]
+        [
+            "--config",
+            "configs/default.yaml",
+            "--camera-index",
+            "2",
+            "--pose-backend",
+            "movenet",
+            "--sensitivity",
+            "expressive",
+        ]
     )
 
     assert args.command == "run"
     assert args.config == "configs/default.yaml"
     assert args.camera_index == 2
+    assert args.pose_backend == "movenet"
     assert args.sensitivity == "expressive"
     assert args.overlay_toggle_key == "o"
     assert args.debug_toggle_key == "d"
@@ -32,6 +42,15 @@ def test_build_config_applies_camera_index_override(tmp_path: Path) -> None:
     config = build_config(config_path.as_posix(), camera_index=4)
 
     assert config.camera.device_index == 4
+
+
+def test_build_config_applies_pose_backend_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "visionbeat.yaml"
+    config_path.write_text("tracker:\n  backend: mediapipe\n", encoding="utf-8")
+
+    config = build_config(config_path.as_posix(), pose_backend="movenet")
+
+    assert config.tracker.backend == "movenet"
 
 
 def test_build_config_applies_debug_and_sensitivity_overrides(tmp_path: Path) -> None:

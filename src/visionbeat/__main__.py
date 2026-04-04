@@ -7,8 +7,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from visionbeat.app import VisionBeatApp
-from visionbeat.config import AppConfig, load_config
+from visionbeat.config import AppConfig, ConfigError, load_config
 from visionbeat.logging_config import configure_logging
+from visionbeat.pose_provider import PoseBackendError, SUPPORTED_POSE_BACKENDS
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -33,6 +34,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=None,
         help="Override the configured camera device index.",
+    )
+    parser.add_argument(
+        "--pose-backend",
+        choices=SUPPORTED_POSE_BACKENDS,
+        default=None,
+        help="Select the pose tracking backend at runtime.",
     )
     debug_group = parser.add_mutually_exclusive_group()
     debug_group.add_argument(
@@ -93,6 +100,7 @@ def build_config(
     config_path: str,
     *,
     camera_index: int | None = None,
+    pose_backend: str | None = None,
     debug: bool = False,
     no_debug: bool = False,
     sensitivity: str = "balanced",
@@ -101,6 +109,8 @@ def build_config(
     config = load_config(Path(config_path))
     if camera_index is not None:
         config = replace(config, camera=replace(config.camera, device_index=camera_index))
+    if pose_backend is not None:
+        config = replace(config, tracker=replace(config.tracker, backend=pose_backend.lower()))
     if debug:
         config = replace(
             config,
@@ -124,24 +134,28 @@ def build_config(
 def main(argv: list[str] | None = None) -> None:
     """Initialize logging, load configuration, and start the application."""
     args = parse_args(argv)
-    config = build_config(
-        args.config,
-        camera_index=args.camera_index,
-        debug=args.debug,
-        no_debug=args.no_debug,
-        sensitivity=args.sensitivity,
-    )
-    configure_logging(
-        config.logging.level,
-        log_format=config.logging.format,
-        structured=config.logging.structured,
-    )
-    app = VisionBeatApp(
-        config,
-        overlay_toggle_key=args.overlay_toggle_key,
-        debug_toggle_key=args.debug_toggle_key,
-    )
-    app.run()
+    try:
+        config = build_config(
+            args.config,
+            camera_index=args.camera_index,
+            pose_backend=args.pose_backend,
+            debug=args.debug,
+            no_debug=args.no_debug,
+            sensitivity=args.sensitivity,
+        )
+        configure_logging(
+            config.logging.level,
+            log_format=config.logging.format,
+            structured=config.logging.structured,
+        )
+        app = VisionBeatApp(
+            config,
+            overlay_toggle_key=args.overlay_toggle_key,
+            debug_toggle_key=args.debug_toggle_key,
+        )
+        app.run()
+    except (ConfigError, PoseBackendError) as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 if __name__ == "__main__":

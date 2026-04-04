@@ -103,7 +103,7 @@ event_log_format = "csv"
         (CameraConfig.from_dict, {"width": 1920, "height": 1080, "fps": 60}, CameraConfig),
         (
             TrackerConfig.from_dict,
-            {"model_complexity": 2, "min_tracking_confidence": 0.6},
+            {"backend": "movenet", "model_complexity": 2, "min_tracking_confidence": 0.6},
             TrackerConfig,
         ),
         (
@@ -145,6 +145,8 @@ def test_config_models_accept_valid_payloads(
     config = factory(payload)
 
     assert isinstance(config, expected_type)
+    if isinstance(config, TrackerConfig):
+        assert config.backend == "movenet"
 
 
 @pytest.mark.parametrize(
@@ -164,6 +166,7 @@ def test_camera_config_validation_errors(payload: dict[str, object], message: st
     ("payload", "message"),
     [
         ({"model_complexity": 3}, "tracker.model_complexity: must be one of 0, 1, 2"),
+        ({"backend": "openpose"}, "tracker.backend: must be either 'mediapipe' or 'movenet'."),
         (
             {"min_detection_confidence": 1.5},
             "tracker.min_detection_confidence: must be less than or equal to 1.0",

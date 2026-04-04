@@ -106,6 +106,15 @@ python -m pip install --upgrade pip
 python -m pip install -e .[dev]
 ```
 
+If you want to use the MoveNet backend as well, install its runtime extra:
+
+```bash
+python -m pip install -e .[movenet]
+```
+
+If you are upgrading an older environment, rerun the install command so pip can
+apply the backend's NumPy compatibility constraint.
+
 ### 3. Generate local placeholder drum samples
 
 The repository intentionally does not commit the generated demo WAV files. Create them locally before the first run:
@@ -126,7 +135,35 @@ You can also override the webcam index from the CLI:
 visionbeat --config configs/default.yaml --camera-index 1
 ```
 
+The pose backend is now selectable at runtime:
+
+```bash
+visionbeat --config configs/default.yaml --pose-backend mediapipe
+```
+
 Press `q` or `Esc` to exit.
+
+## Pose backends
+
+VisionBeat now routes body tracking through a backend abstraction. The current options are:
+
+- `mediapipe` — the default and fully supported backend.
+- `movenet` — TensorFlow Lite-backed single-pose MoveNet Lightning.
+
+Backends normalize their output into the shared `TrackerOutput` landmark schema, so gesture detection stays independent from MediaPipe or any future SDK-specific landmark object.
+
+`movenet` requires the optional runtime extra:
+
+```bash
+python -m pip install -e .[movenet]
+```
+
+To add a future backend:
+
+1. implement the `PoseProvider` interface in a new module under `src/visionbeat/`,
+2. map backend-native keypoints into VisionBeat landmark names such as `left_shoulder` and `right_wrist`,
+3. return normalized coordinates plus confidence through `TrackerOutput`,
+4. register the backend in `create_pose_provider()` in [`src/visionbeat/pose_provider.py`](src/visionbeat/pose_provider.py).
 
 ## Local run workflow
 

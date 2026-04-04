@@ -511,7 +511,7 @@ def test_visionbeat_app_builds_runtime_from_default_dependency_factories(monkeyp
 
     monkeypatch.setattr("visionbeat.app.build_observability_recorder", lambda config: recorder)
     monkeypatch.setattr("visionbeat.app.CameraSource", StubCamera)
-    monkeypatch.setattr("visionbeat.app.PoseTracker", StubTracker)
+    monkeypatch.setattr("visionbeat.app.create_pose_provider", StubTracker)
     monkeypatch.setattr("visionbeat.app.GestureDetector", StubDetector)
     monkeypatch.setattr("visionbeat.app.create_audio_engine", lambda config: StubAudio())
     monkeypatch.setattr("visionbeat.app.OverlayRenderer", StubOverlay)
@@ -526,6 +526,7 @@ def test_visionbeat_app_builds_runtime_from_default_dependency_factories(monkeyp
     assert created["detector"] == (app.config.gestures, recorder)
     assert created["overlay"] == app.config.overlay
     assert recorder.app_startups[0]["camera_resolution"] == "1280x720"
+    assert recorder.app_startups[0]["pose_backend"] == "mediapipe"
     assert app.runtime.overlay_toggle_key == ord("o")
     assert app.runtime.debug_toggle_key == ord("d")
 
@@ -536,7 +537,7 @@ def test_visionbeat_app_accepts_custom_toggle_keys(monkeypatch) -> None:
         lambda config: FakeRecorder(),
     )
     monkeypatch.setattr("visionbeat.app.CameraSource", lambda config, recorder=None: object())
-    monkeypatch.setattr("visionbeat.app.PoseTracker", lambda config: object())
+    monkeypatch.setattr("visionbeat.app.create_pose_provider", lambda config: object())
     monkeypatch.setattr("visionbeat.app.GestureDetector", lambda config, observer=None: object())
     monkeypatch.setattr("visionbeat.app.create_audio_engine", lambda config: FakeAudio())
     monkeypatch.setattr("visionbeat.app.OverlayRenderer", lambda config: FakeOverlay())

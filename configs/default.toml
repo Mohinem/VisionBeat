@@ -7,6 +7,7 @@ mirror = true
 window_name = "VisionBeat"
 
 [tracker]
+backend = "mediapipe"
 model_complexity = 1
 min_detection_confidence = 0.55
 min_tracking_confidence = 0.55

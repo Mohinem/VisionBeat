@@ -7,6 +7,9 @@ camera:
   window_name: VisionBeat
 
 tracker:
+  # Gesture detection consumes TrackerOutput, so backends only need to map
+  # their native keypoints into the shared landmark names.
+  backend: mediapipe
   model_complexity: 1
   min_detection_confidence: 0.55
   min_tracking_confidence: 0.55

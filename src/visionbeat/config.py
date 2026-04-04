@@ -193,8 +193,9 @@ class CameraConfig:
 
 @dataclass(frozen=True, slots=True)
 class TrackerConfig:
-    """MediaPipe tracking model configuration."""
+    """Pose tracking backend configuration."""
 
+    backend: str = "mediapipe"
     model_complexity: int = 1
     min_detection_confidence: float = 0.55
     min_tracking_confidence: float = 0.55
@@ -206,13 +207,19 @@ class TrackerConfig:
         reader = _ConfigReader(payload, path="tracker")
         reader.reject_unknown_keys(
             {
+                "backend",
                 "model_complexity",
                 "min_detection_confidence",
                 "min_tracking_confidence",
                 "enable_segmentation",
             }
         )
+        backend = reader.string("backend", default="mediapipe", non_empty=True) or "mediapipe"
+        backend = backend.lower()
+        if backend not in {"mediapipe", "movenet"}:
+            raise ConfigError("tracker.backend: must be either 'mediapipe' or 'movenet'.")
         return cls(
+            backend=backend,
             model_complexity=reader.integer(
                 "model_complexity", default=1, allowed={0, 1, 2}
             ),
@@ -233,6 +240,7 @@ class TrackerConfig:
     def to_dict(self) -> dict[str, Any]:
         """Serialize the configuration into a dictionary."""
         return {
+            "backend": self.backend,
             "model_complexity": self.model_complexity,
             "min_detection_confidence": self.min_detection_confidence,
             "min_tracking_confidence": self.min_tracking_confidence,
