@@ -17,10 +17,14 @@ enable_segmentation = false
 punch_forward_delta_z = 0.006
 punch_max_vertical_drift = 0.75
 strike_down_delta_y = 0.15
-strike_max_depth_drift = 0.1
-min_velocity = 0.75
-candidate_ratio = 0.7
-axis_dominance_ratio = 1.7
+strike_confirmation_ratio = 0.65
+strike_max_depth_drift = 0.18
+snare_collision_distance = 0.13
+snare_confirmation_velocity_ratio = 0.9
+snare_collision_max_depth_gap = 0.18
+min_velocity = 0.39
+candidate_ratio = 0.6
+axis_dominance_ratio = 1.2
 
 [gestures.cooldowns]
 trigger_seconds = 0.2

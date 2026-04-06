@@ -255,7 +255,11 @@ class GestureThresholdsConfig:
     punch_forward_delta_z: float = 0.006
     punch_max_vertical_drift: float = 0.75
     strike_down_delta_y: float = 0.15
+    strike_confirmation_ratio: float = 0.65
     strike_max_depth_drift: float = 0.18
+    snare_collision_distance: float = 0.15
+    snare_confirmation_velocity_ratio: float = 0.9
+    snare_collision_max_depth_gap: float = 0.18
     min_velocity: float = 0.39
     candidate_ratio: float = 0.6
     axis_dominance_ratio: float = 1.2
@@ -269,7 +273,11 @@ class GestureThresholdsConfig:
                 "punch_forward_delta_z",
                 "punch_max_vertical_drift",
                 "strike_down_delta_y",
+                "strike_confirmation_ratio",
                 "strike_max_depth_drift",
+                "snare_collision_distance",
+                "snare_confirmation_velocity_ratio",
+                "snare_collision_max_depth_gap",
                 "min_velocity",
                 "candidate_ratio",
                 "axis_dominance_ratio",
@@ -285,8 +293,31 @@ class GestureThresholdsConfig:
             strike_down_delta_y=reader.number(
                 "strike_down_delta_y", default=0.15, minimum=0.0, inclusive_min=False
             ),
+            strike_confirmation_ratio=reader.number(
+                "strike_confirmation_ratio",
+                default=0.65,
+                minimum=0.0,
+                maximum=1.0,
+                inclusive_min=False,
+            ),
             strike_max_depth_drift=reader.number(
                 "strike_max_depth_drift", default=0.18, minimum=0.0, inclusive_min=False
+            ),
+            snare_collision_distance=reader.number(
+                "snare_collision_distance", default=0.13, minimum=0.0, inclusive_min=False
+            ),
+            snare_confirmation_velocity_ratio=reader.number(
+                "snare_confirmation_velocity_ratio",
+                default=0.9,
+                minimum=0.0,
+                maximum=1.0,
+                inclusive_min=False,
+            ),
+            snare_collision_max_depth_gap=reader.number(
+                "snare_collision_max_depth_gap",
+                default=0.18,
+                minimum=0.0,
+                inclusive_min=False,
             ),
             min_velocity=reader.number(
                 "min_velocity", default=0.39, minimum=0.0, inclusive_min=False
@@ -305,7 +336,11 @@ class GestureThresholdsConfig:
             "punch_forward_delta_z": self.punch_forward_delta_z,
             "punch_max_vertical_drift": self.punch_max_vertical_drift,
             "strike_down_delta_y": self.strike_down_delta_y,
+            "strike_confirmation_ratio": self.strike_confirmation_ratio,
             "strike_max_depth_drift": self.strike_max_depth_drift,
+            "snare_collision_distance": self.snare_collision_distance,
+            "snare_confirmation_velocity_ratio": self.snare_confirmation_velocity_ratio,
+            "snare_collision_max_depth_gap": self.snare_collision_max_depth_gap,
             "min_velocity": self.min_velocity,
             "candidate_ratio": self.candidate_ratio,
             "axis_dominance_ratio": self.axis_dominance_ratio,
@@ -409,22 +444,22 @@ class GestureConfig:
 
     @property
     def punch_forward_delta_z(self) -> float:
-        """Return the legacy config key used for kick travel distance."""
+        """Return the legacy punch threshold kept for backward-compatible configs."""
         return self.thresholds.punch_forward_delta_z
 
     @property
     def punch_max_vertical_drift(self) -> float:
-        """Return the legacy config key used for kick vertical drift."""
+        """Return the legacy punch drift threshold kept for backward-compatible configs."""
         return self.thresholds.punch_max_vertical_drift
 
     @property
     def kick_outward_delta_x(self) -> float:
-        """Return the inward horizontal travel threshold used for kick detection."""
+        """Return the legacy kick-travel alias preserved for compatibility."""
         return self.thresholds.punch_forward_delta_z
 
     @property
     def kick_max_vertical_drift(self) -> float:
-        """Return the maximum vertical drift allowed for an inward-jab kick."""
+        """Return the legacy kick-drift alias preserved for compatibility."""
         return self.thresholds.punch_max_vertical_drift
 
     @property
@@ -433,9 +468,29 @@ class GestureConfig:
         return self.thresholds.strike_down_delta_y
 
     @property
+    def strike_confirmation_ratio(self) -> float:
+        """Return the ratio applied to strike travel during final kick confirmation."""
+        return self.thresholds.strike_confirmation_ratio
+
+    @property
     def strike_max_depth_drift(self) -> float:
         """Return the maximum depth drift for downward strikes."""
         return self.thresholds.strike_max_depth_drift
+
+    @property
+    def snare_collision_distance(self) -> float:
+        """Return the wrist-distance threshold used for collision snare detection."""
+        return self.thresholds.snare_collision_distance
+
+    @property
+    def snare_confirmation_velocity_ratio(self) -> float:
+        """Return the ratio applied to snare closing speed during confirmation."""
+        return self.thresholds.snare_confirmation_velocity_ratio
+
+    @property
+    def snare_collision_max_depth_gap(self) -> float:
+        """Return the maximum wrist depth gap allowed for collision snare detection."""
+        return self.thresholds.snare_collision_max_depth_gap
 
     @property
     def min_velocity(self) -> float:

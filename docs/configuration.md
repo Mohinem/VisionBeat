@@ -56,7 +56,11 @@ gestures:
     punch_forward_delta_z: 0.006
     punch_max_vertical_drift: 0.75
     strike_down_delta_y: 0.15
+    strike_confirmation_ratio: 0.65
     strike_max_depth_drift: 0.18
+    snare_collision_distance: 0.13
+    snare_confirmation_velocity_ratio: 0.9
+    snare_collision_max_depth_gap: 0.18
     min_velocity: 0.39
     candidate_ratio: 0.6
     axis_dominance_ratio: 1.2
@@ -129,15 +133,19 @@ Controls wrist-history sizing, active-hand selection, timing windows, and gestur
 
 #### `gestures.thresholds`
 
-- `punch_forward_delta_z` (`float`, default `0.006`): legacy config key that now sets the inward side-jab travel needed for kick detection.
-- `punch_max_vertical_drift` (`float`, default `0.75`): maximum allowed vertical drift during an inward-jab kick.
-- `strike_down_delta_y` (`float`, default `0.15`): minimum downward travel for snare detection.
-- `strike_max_depth_drift` (`float`, default `0.18`): maximum allowed depth drift during a snare-style downward strike.
+- `punch_forward_delta_z` (`float`, default `0.006`): legacy compatibility field retained for older configs and sensitivity presets.
+- `punch_max_vertical_drift` (`float`, default `0.75`): legacy compatibility field retained for older configs and sensitivity presets.
+- `strike_down_delta_y` (`float`, default `0.15`): minimum downward travel for kick detection.
+- `strike_confirmation_ratio` (`float`, default `0.65`): multiplier applied to `strike_down_delta_y` during final kick confirmation.
+- `strike_max_depth_drift` (`float`, default `0.18`): maximum allowed depth drift during a downward-strike kick.
+- `snare_collision_distance` (`float`, default `0.13`): maximum image-plane wrist distance allowed for snare confirmation.
+- `snare_confirmation_velocity_ratio` (`float`, default `0.9`): multiplier applied to `min_velocity` during final snare closing-speed confirmation.
+- `snare_collision_max_depth_gap` (`float`, default `0.18`): maximum wrist depth gap allowed for snare confirmation.
 - `min_velocity` (`float`, default `0.39`): shared baseline motion speed used by both gestures.
 - `candidate_ratio` (`float`, default `0.6`): ratio used to derive lower onset thresholds from the base displacement thresholds.
-- `axis_dominance_ratio` (`float`, default `1.2`): baseline dominance factor for the primary motion axis before gesture-specific relaxation is applied.
+- `axis_dominance_ratio` (`float`, default `1.2`): baseline dominance factor for the downward-strike kick axis.
 
-`punch_forward_delta_z` and `punch_max_vertical_drift` keep their older names for backward compatibility, but they now tune a very permissive inward-lateral kick detector rather than a depth punch gesture.
+`punch_forward_delta_z` and `punch_max_vertical_drift` are no longer part of the active gesture logic, but they remain in the schema for backward compatibility with older configs.
 
 #### `gestures.cooldowns`
 
@@ -202,34 +210,28 @@ Do not tune gestures while tracking is unstable. First ensure the performer rema
 
 ### 2. Tune the kick gesture
 
-If inward side-jabs do not trigger:
+If downward strikes do not trigger:
 
-- lower `punch_forward_delta_z` slightly,
+- lower `strike_down_delta_y` slightly,
 - or lower `min_velocity` if the performer uses softer attacks.
-
-If inward side-jabs are being stolen by snare or feel too strict:
-
-- lower `punch_forward_delta_z` slightly,
-- widen `punch_max_vertical_drift` if the player naturally drops the hand while jabbing inward,
-- or check whether the active hand is starting from too close to the body centerline.
 
 If kicks false-trigger during unrelated diagonal movement:
 
 - increase `axis_dominance_ratio`,
-- or tighten `punch_max_vertical_drift`.
+- or tighten `strike_max_depth_drift`.
 
 ### 3. Tune the snare gesture
 
-If downward hits do not trigger:
+If wrist collisions do not trigger:
 
-- lower `strike_down_delta_y`,
+- increase `snare_collision_distance`,
 - or slightly extend `analysis_window_seconds` if the motion unfolds more gradually.
 
-If random arm drops trigger snares:
+If near-crossings or loose arm passes trigger snares:
 
 - increase `min_velocity`,
-- tighten `strike_max_depth_drift`,
-- or increase `axis_dominance_ratio`.
+- tighten `snare_collision_max_depth_gap`,
+- or require a smaller `snare_collision_distance`.
 
 ### 4. Tune timing behavior
 
@@ -246,8 +248,8 @@ Likely symptom: gestures feel too small in normalized space.
 
 Try:
 
-- lowering `punch_forward_delta_z`,
 - lowering `strike_down_delta_y`,
+- increasing `snare_collision_distance`,
 - and keeping `min_velocity` high enough to avoid false positives.
 
 ### Performer uses large theatrical movements

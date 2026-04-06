@@ -70,6 +70,7 @@ def test_build_config_applies_debug_and_sensitivity_overrides(tmp_path: Path) ->
     assert config.debug.overlays.show_debug_panel is True
     assert config.gestures.thresholds.punch_forward_delta_z > 0.2
     assert config.gestures.thresholds.strike_down_delta_y > 0.26
+    assert config.gestures.thresholds.snare_collision_distance < 0.12
 
 
 def test_parse_args_rejects_conflicting_debug_flags() -> None:

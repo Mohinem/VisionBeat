@@ -2,8 +2,8 @@
 
 VisionBeat is a **camera-based gestural percussion instrument** built in Python. A webcam observes upper-body motion, MediaPipe estimates arm landmarks, a gesture detector classifies rhythmic strikes, and an audio engine triggers drum samples in real time. The current prototype focuses on two core performance gestures:
 
-- **Inward side-jab → kick**
-- **Downward strike → snare**
+- **Downward strike → kick**
+- **Wrist collision → snare**
 
 The project is deliberately framed as both a **research prototype** and a **performable instrument**. It is useful for studying embodied rhythm interaction, but it is also structured so that a performer can stand in front of a single webcam and play drum-like patterns without wearing sensors or holding a controller.
 
@@ -22,8 +22,8 @@ That framing matters for research in at least four ways:
 
 VisionBeat should be presented as an **embodied rhythm instrument**, not just a pose-recognition demo. The player performs percussive intent through arm trajectories:
 
-- an **inward side-jab** feels like a bass-drum attack,
-- a **downward hit** feels like a snare accent,
+- a **downward hit** feels like a bass-drum attack,
+- a **wrist-to-wrist collision** feels like a snare accent,
 - the webcam becomes the sensing membrane,
 - and the gesture detector becomes the instrument’s strike interpretation layer.
 
@@ -38,7 +38,7 @@ This framing helps clarify the design choices throughout the repository:
 
 If you need a short presentation story, use something like this:
 
-> VisionBeat is a camera-based gestural percussion instrument for embodied rhythm performance. A single webcam tracks the performer’s upper body, interprets inward-jab and downward-strike arm motions as drum hits, and plays percussion samples in real time. The project sits between HCI research and digital instrument design: it asks how rhythmic intention can be expressed through visible, full-body movement while keeping the sensing setup lightweight, transparent, and reproducible.
+> VisionBeat is a camera-based gestural percussion instrument for embodied rhythm performance. A single webcam tracks the performer’s upper body, interprets downward-strike and wrist-collision motions as drum hits, and plays percussion samples in real time. The project sits between HCI research and digital instrument design: it asks how rhythmic intention can be expressed through visible, full-body movement while keeping the sensing setup lightweight, transparent, and reproducible.
 
 ## What the system currently does
 
@@ -173,21 +173,21 @@ A practical local development loop looks like this:
 2. generate demo samples,
 3. stand centered in front of the webcam,
 4. verify that shoulders, elbows, and wrists appear in the overlay,
-5. test the **inward side-jab** gesture first,
-6. then test the **downward strike** gesture,
+5. test the **downward strike** gesture first,
+6. then test the **wrist collision** gesture,
 7. and tune thresholds if the detector is too sensitive or too conservative.
 
 For step-by-step performer setup, see [`docs/demo_guide.md`](docs/demo_guide.md).
 
 ## Gesture vocabulary
 
-### Inward side-jab → kick
+### Downward strike → kick
 
-A kick is triggered when the active wrist snaps **inward toward the body centerline** quickly enough, with limited vertical drift and sufficient lateral dominance. When shoulder tracking is stable, the detector evaluates this as shrinking shoulder-relative horizontal distance; when shoulder visibility is poor, it falls back to a raw left/right wrist motion check.
+A kick is triggered when the configured active wrist moves **downward on screen** quickly enough, with limited depth drift and sufficient vertical dominance in normalized `y`.
 
-### Downward strike → snare
+### Wrist collision → snare
 
-A snare is triggered when the active wrist moves **downward on screen** quickly enough, with limited depth drift and sufficient vertical dominance in normalized `y`. Kick-like inward motion is explicitly biased away from the snare path so diagonal inward jabs do not steal snare hits as easily.
+A snare is triggered when the tracked wrists **move close together** quickly enough in image space, while also staying close in depth. The bilateral collision path takes priority over kick when both motions overlap on the same frame.
 
 The detector uses a candidate/confirmation model plus cooldown to reduce accidental retriggers. The formal definitions are documented in [`docs/gesture_definitions.md`](docs/gesture_definitions.md).
 
@@ -200,13 +200,15 @@ Start with the defaults, then calibrate in this order:
 1. **Tracking confidence first**
    - If landmarks flicker or disappear, adjust the camera setup before changing gesture thresholds.
 2. **Primary gesture displacement**
-   - Raise or lower `punch_forward_delta_z` and `strike_down_delta_y` based on how far the wrist must travel. `punch_forward_delta_z` is a legacy config key name that now controls inward kick travel rather than a depth punch.
+   - Raise or lower `strike_down_delta_y` and `snare_collision_distance` based on how far the active hand must drop and how close the wrists must come together.
+   - If kick candidates arm but stop short of confirming, lower `strike_confirmation_ratio`.
 3. **Velocity threshold**
    - Increase `min_velocity` to reject slow drifting motion.
+   - If snare candidates arm but stop short of confirming, lower `snare_confirmation_velocity_ratio`.
 4. **Axis dominance**
-   - Increase `axis_dominance_ratio` to reject diagonal or ambiguous movements.
+   - Increase `axis_dominance_ratio` to reject diagonal or ambiguous kick motions.
 5. **Drift tolerances**
-   - Tighten `punch_max_vertical_drift` or `strike_max_depth_drift` if cross-axis motion causes false positives.
+   - Tighten `strike_max_depth_drift` or `snare_collision_max_depth_gap` if cross-axis motion causes false positives.
 6. **Cooldown and confirmation**
    - Tune `trigger_seconds`, `analysis_window_seconds`, and `confirmation_window_seconds` for responsiveness versus stability.
 
@@ -242,7 +244,7 @@ For the full test strategy, markers, and hardware caveats, see [`docs/testing.md
 - Confirm the overlay shows wrists, elbows, and shoulders.
 - Make sure the active hand in config matches the hand you are performing with.
 - Move slightly slower first so the tracker can stay locked, then build speed.
-- Reduce `punch_forward_delta_z` or `strike_down_delta_y` only after verifying stable tracking. For kick, `punch_forward_delta_z` still controls the inward-jab travel requirement despite its legacy name.
+- Reduce `strike_down_delta_y` or increase `snare_collision_distance` only after verifying stable tracking.
 
 ### Tracking flickers or frequently reports no person detected
 

@@ -17,7 +17,7 @@ VisionBeat extracts six pose landmarks:
 - left wrist,
 - right wrist.
 
-This subset is enough for the current instrument because kick/snare detection is driven mainly by the wrist trajectory, while shoulder landmarks also support the shoulder-relative inward-jab kick model and elbow landmarks support overlay rendering and future arm-chain validation.
+This subset is enough for the current instrument because kick/snare detection is driven mainly by the wrists. Shoulders still help stabilize the active-hand kick path against body sway, and elbows support overlay rendering and future arm-chain validation.
 
 ## Why pose tracking instead of hand tracking
 
@@ -89,7 +89,7 @@ Set `gestures.active_hand` to the hand you will use in performance. This avoids 
 
 ### Step 3: rehearse each gesture slowly
 
-Test the inward side-jab kick and downward strike at moderate speed. The goal is to confirm the tracker keeps up before you optimize for energy or latency.
+Test the downward-strike kick and wrist-collision snare at moderate speed. The goal is to confirm the tracker keeps up before you optimize for energy or latency.
 
 ### Step 4: inspect gesture failures by type
 
@@ -131,7 +131,7 @@ Very fast gestures can temporarily reduce reliability, especially in low light.
 
 ### Camera angle mismatch
 
-A very low or high camera angle can distort the apparent motion axis and make an inward side-jab look diagonal or a downward strike look shallow.
+A very low or high camera angle can distort the apparent motion axis and make a downward strike look shallow or a wrist collision appear farther apart than it really is.
 
 ### Distance scaling
 

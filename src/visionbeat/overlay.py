@@ -70,6 +70,11 @@ _LANDMARK_CONNECTIONS: tuple[tuple[str, str], ...] = (
     ("right_shoulder", "right_elbow"),
     ("right_elbow", "right_wrist"),
 )
+_TRIGGER_FLASH_DURATION_SECONDS = 0.2
+_TRIGGER_FLASH_WIDTH_RATIO = 0.4
+_TRIGGER_FLASH_HEIGHT_RATIO = 0.4
+_TRIGGER_FLASH_MIN_WIDTH = 96
+_TRIGGER_FLASH_MIN_HEIGHT = 72
 
 
 class OverlayRenderer:
@@ -96,6 +101,9 @@ class OverlayRenderer:
 
         if self._overlay_enabled and self.config.draw_landmarks:
             draw_pose_landmarks(output, state.pose, cv2_module=self._cv2)
+
+        if self._overlay_enabled:
+            draw_trigger_flash(output, state, cv2_module=self._cv2)
 
         if self._overlay_enabled and self._debug_enabled:
             draw_labels(output, _build_debug_labels(state), cv2_module=self._cv2)
@@ -219,4 +227,47 @@ def draw_labels(
             (100, 220, 255) if index > 1 else (255, 255, 255),
             2,
         )
+    return frame
+
+
+def draw_trigger_flash(
+    frame: Frame,
+    state: RenderState,
+    *,
+    cv2_module: Cv2Protocol | None = None,
+) -> Frame:
+    """Flash a centered trigger marker for recently confirmed gestures."""
+    if state.confirmed_gesture is None:
+        return frame
+
+    flash_age = state.pose.timestamp.seconds - state.confirmed_gesture.timestamp.seconds
+    if flash_age < 0.0 or flash_age > _TRIGGER_FLASH_DURATION_SECONDS:
+        return frame
+
+    cv2 = _get_cv2_module(cv2_module)
+    height, width = frame.shape[:2]
+    flash_width = min(width, max(_TRIGGER_FLASH_MIN_WIDTH, int(width * _TRIGGER_FLASH_WIDTH_RATIO)))
+    flash_height = min(
+        height,
+        max(_TRIGGER_FLASH_MIN_HEIGHT, int(height * _TRIGGER_FLASH_HEIGHT_RATIO)),
+    )
+    left = max(0, (width - flash_width) // 2)
+    top = max(0, (height - flash_height) // 2)
+    right = min(width, left + flash_width)
+    bottom = min(height, top + flash_height)
+    cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), -1)
+    sound_name = state.confirmed_gesture.gesture.value.upper()
+    text_origin = (
+        left + max(10, flash_width // 8),
+        top + max(28, int(flash_height * 0.62)),
+    )
+    cv2.putText(
+        frame,
+        sound_name,
+        text_origin,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.4,
+        (255, 255, 255),
+        4,
+    )
     return frame

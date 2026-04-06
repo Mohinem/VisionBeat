@@ -33,6 +33,10 @@ def test_load_config_supports_nested_yaml_sections() -> None:
     assert config.gestures.thresholds.punch_forward_delta_z == pytest.approx(0.006)
     assert config.gestures.thresholds.punch_max_vertical_drift == pytest.approx(0.75)
     assert config.gestures.thresholds.strike_down_delta_y == pytest.approx(0.15)
+    assert config.gestures.thresholds.strike_confirmation_ratio == pytest.approx(0.65)
+    assert config.gestures.thresholds.snare_collision_distance == pytest.approx(0.24)
+    assert config.gestures.thresholds.snare_confirmation_velocity_ratio == pytest.approx(0.9)
+    assert config.gestures.thresholds.snare_collision_max_depth_gap == pytest.approx(0.22)
     assert config.gestures.thresholds.axis_dominance_ratio == pytest.approx(1.2)
     assert config.gestures.cooldowns.trigger_seconds == pytest.approx(0.2)
     assert config.gestures.cooldowns.analysis_window_seconds == pytest.approx(0.24)
@@ -182,6 +186,14 @@ def test_tracker_config_validation_errors(payload: dict[str, object], message: s
     ("payload", "message"),
     [
         ({"candidate_ratio": 0.0}, "gestures.thresholds.candidate_ratio: must be greater than 0.0"),
+        (
+            {"strike_confirmation_ratio": 1.1},
+            "gestures.thresholds.strike_confirmation_ratio: must be less than or equal to 1.0",
+        ),
+        (
+            {"snare_confirmation_velocity_ratio": 1.1},
+            "gestures.thresholds.snare_confirmation_velocity_ratio: must be less than or equal to 1.0",
+        ),
         (
             {"axis_dominance_ratio": 0.9},
             "gestures.thresholds.axis_dominance_ratio: must be greater than or equal to 1.0",

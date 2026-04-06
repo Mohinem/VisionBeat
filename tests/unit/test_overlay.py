@@ -3,8 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from visionbeat.config import OverlayConfig
-from visionbeat.models import FrameTimestamp, LandmarkPoint, RenderState, TrackerOutput
-from visionbeat.overlay import OverlayRenderer, draw_labels, draw_pose_landmarks
+from visionbeat.models import (
+    FrameTimestamp,
+    GestureEvent,
+    GestureType,
+    LandmarkPoint,
+    RenderState,
+    TrackerOutput,
+)
+from visionbeat.overlay import OverlayRenderer, draw_labels, draw_pose_landmarks, draw_trigger_flash
 
 
 @dataclass
@@ -82,3 +89,51 @@ def test_overlay_renderer_renders_debug_panel_without_events() -> None:
 
     assert output.shape == frame.shape
     assert output is not frame
+
+
+def test_draw_trigger_flash_renders_centered_red_block_with_sound_name() -> None:
+    frame = FakeFrame(120, 160)
+    fake_cv2 = FakeCV2()
+    pose = make_pose()
+    state = RenderState(
+        pose=pose,
+        frame_index=0,
+        confirmed_gesture=GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.9,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=0.95),
+            label="Downward strike → kick",
+        ),
+    )
+
+    result = draw_trigger_flash(frame, state, cv2_module=fake_cv2)
+
+    assert result is frame
+    assert ("rectangle", (frame, (32, 24), (128, 96), (0, 0, 255), -1)) in fake_cv2.calls
+    assert any(
+        name == "putText" and args[1] == "KICK"
+        for name, args in fake_cv2.calls
+    )
+
+
+def test_draw_trigger_flash_skips_stale_confirmed_gesture() -> None:
+    frame = FakeFrame(120, 160)
+    fake_cv2 = FakeCV2()
+    pose = make_pose()
+    state = RenderState(
+        pose=pose,
+        frame_index=0,
+        confirmed_gesture=GestureEvent(
+            gesture=GestureType.SNARE,
+            confidence=0.9,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=0.70),
+            label="Wrist collision → snare",
+        ),
+    )
+
+    result = draw_trigger_flash(frame, state, cv2_module=fake_cv2)
+
+    assert result is frame
+    assert fake_cv2.calls == []

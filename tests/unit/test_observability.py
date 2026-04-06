@@ -120,11 +120,11 @@ def test_detector_emits_candidate_trigger_and_cooldown_observations() -> None:
         observer=observer,
     )
 
-    first_events = detector.update(make_frame(0.00, (0.60, 0.40, -0.08)))
-    second_events = detector.update(make_frame(0.05, (0.52, 0.41, -0.09)))
-    third_events = detector.update(make_frame(0.10, (0.45, 0.41, -0.10)))
-    detector.update(make_frame(0.20, (0.62, 0.41, -0.08)))
-    detector.update(make_frame(0.24, (0.47, 0.42, -0.10)))
+    first_events = detector.update(make_frame(0.00, (0.55, 0.20, -0.05)))
+    second_events = detector.update(make_frame(0.05, (0.56, 0.36, -0.06)))
+    third_events = detector.update(make_frame(0.10, (0.57, 0.45, -0.07)))
+    detector.update(make_frame(0.20, (0.56, 0.24, -0.05)))
+    detector.update(make_frame(0.24, (0.57, 0.39, -0.06)))
     events = first_events + second_events + third_events
 
     assert len(events) == 1
