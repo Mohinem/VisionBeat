@@ -69,3 +69,5 @@ logging:
   structured: true
   event_log_path: null
   event_log_format: jsonl
+  session_recording_path: null
+  session_recording_mode: tracker_outputs

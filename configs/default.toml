@@ -65,3 +65,5 @@ format = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 structured = true
 event_log_path = ""
 event_log_format = "jsonl"
+session_recording_path = ""
+session_recording_mode = "tracker_outputs"

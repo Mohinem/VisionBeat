@@ -103,6 +103,8 @@ logging:
   structured: true
   event_log_path: null
   event_log_format: jsonl
+  session_recording_path: null
+  session_recording_mode: tracker_outputs
 ```
 
 ## Section-by-section reference
@@ -199,6 +201,8 @@ Controls log output and optional event tracing.
 - `structured` (`bool`, default `true`): append structured JSON payloads to log lines.
 - `event_log_path` (`str | null`, default `null`): optional file path for event tracing.
 - `event_log_format` (`jsonl | csv`, default `jsonl`): file format for event traces.
+- `session_recording_path` (`str | null`, default `null`): optional directory where VisionBeat creates timestamped session bundles for replay and analysis.
+- `session_recording_mode` (`tracker_outputs | raw_frames | both`, default `tracker_outputs`): whether a session bundle stores normalized tracker outputs only, raw camera frames only, or both.
 
 ## Calibration guide
 

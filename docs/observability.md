@@ -4,6 +4,7 @@ VisionBeat now emits two complementary telemetry streams:
 
 1. **Structured application logs** for startup, shutdown, camera initialization, tracking failures, gesture candidates, confirmed triggers, and cooldown suppression.
 2. **Optional event logs** in **JSONL** or **CSV** for offline analysis of false positives, missed gestures, and end-to-end latency.
+3. **Optional session bundles** for research replay. These can store normalized tracker outputs, raw camera frames, or both, together with the effective config and confirmed trigger events.
 
 ## Configuration
 
@@ -16,11 +17,31 @@ logging:
   structured: true
   event_log_path: logs/visionbeat-events.jsonl
   event_log_format: jsonl
+  session_recording_path: logs/sessions
+  session_recording_mode: both
 ```
 
 - `structured`: appends machine-readable JSON payloads to standard log lines.
 - `event_log_path`: when set, writes gesture-analysis events to disk.
 - `event_log_format`: choose `jsonl` or `csv`.
+- `session_recording_path`: when set, creates a timestamped session directory under that path.
+- `session_recording_mode`: choose `tracker_outputs`, `raw_frames`, or `both`.
+
+## Session bundle layout
+
+Each recorded session uses a directory named like `session-20260406T123456789012Z/` and includes:
+
+- `manifest.json`: schema version, recording mode, effective config, artifact list, and item counts.
+- `triggers.jsonl`: confirmed gesture events as serialized `GestureEvent` payloads.
+- `tracker_outputs.jsonl`: one normalized `TrackerOutput` payload per processed frame when tracker recording is enabled.
+- `camera_frames.jsonl`: per-frame metadata plus the relative file path of each saved raw frame when raw-frame recording is enabled.
+- `frames/*.npy`: lossless NumPy dumps of raw camera frames when raw-frame recording is enabled.
+
+This layout is intended for exact offline replay:
+
+- `tracker_outputs` mode supports detector-only replay.
+- `raw_frames` mode preserves the original camera input for tracker-and-detector replay.
+- `both` mode keeps both representations in the same bundle for side-by-side evaluation.
 
 ## Structured log coverage
 

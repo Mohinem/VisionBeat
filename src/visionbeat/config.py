@@ -718,13 +718,23 @@ class LoggingConfig:
     structured: bool = True
     event_log_path: str | None = None
     event_log_format: str = "jsonl"
+    session_recording_path: str | None = None
+    session_recording_mode: str = "tracker_outputs"
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> LoggingConfig:
         """Build logging configuration from a validated mapping."""
         reader = _ConfigReader(payload, path="logging")
         reader.reject_unknown_keys(
-            {"level", "format", "structured", "event_log_path", "event_log_format"}
+            {
+                "level",
+                "format",
+                "structured",
+                "event_log_path",
+                "event_log_format",
+                "session_recording_path",
+                "session_recording_mode",
+            }
         )
         level = reader.string("level", default="INFO", non_empty=True) or "INFO"
         event_log_format = (
@@ -733,6 +743,20 @@ class LoggingConfig:
         if event_log_format not in {"jsonl", "csv"}:
             raise ConfigError("logging.event_log_format: must be either 'jsonl' or 'csv'.")
         event_log_path = reader.string("event_log_path", default=None)
+        session_recording_mode = (
+            reader.string(
+                "session_recording_mode",
+                default="tracker_outputs",
+                non_empty=True,
+            )
+            or "tracker_outputs"
+        ).lower()
+        if session_recording_mode not in {"tracker_outputs", "raw_frames", "both"}:
+            raise ConfigError(
+                "logging.session_recording_mode: must be one of "
+                "'tracker_outputs', 'raw_frames', or 'both'."
+            )
+        session_recording_path = reader.string("session_recording_path", default=None)
         return cls(
             level=level.upper(),
             format=reader.string(
@@ -744,6 +768,8 @@ class LoggingConfig:
             structured=reader.boolean("structured", default=True),
             event_log_path=event_log_path or None,
             event_log_format=event_log_format,
+            session_recording_path=session_recording_path or None,
+            session_recording_mode=session_recording_mode,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -754,6 +780,8 @@ class LoggingConfig:
             "structured": self.structured,
             "event_log_path": self.event_log_path,
             "event_log_format": self.event_log_format,
+            "session_recording_path": self.session_recording_path,
+            "session_recording_mode": self.session_recording_mode,
         }
 
 
