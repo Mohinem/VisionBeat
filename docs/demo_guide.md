@@ -19,20 +19,19 @@ This guide is optimized for a **2-minute live demo** during a research presentat
 
 ## Performing gestures for reliable detection
 
-### Inward side-jab (kick)
-
-- Use the configured active hand.
-- Start with the wrist slightly outside the active-side shoulder line.
-- Snap the wrist **inward toward the sternum / centerline** with clear acceleration.
-- A little downward drift is fine; the motion should still feel more sideways-inward than purely downward.
-- Move the hand back outward between hits so the detector can re-arm cleanly.
-
-### Downward strike (snare)
+### Downward strike (kick)
 
 - Start from a comfortable raised position.
 - Move the wrist **clearly downward** in one accented motion.
 - Avoid excessive forward/backward travel during the strike.
 - Re-center before the next gesture to reduce ambiguity.
+
+### Wrist collision (snare)
+
+- Keep both wrists visible before starting the gesture.
+- Move the right wrist toward the left wrist in one clear approach.
+- Let the wrists come **close together in image space** rather than only passing each other at different depths.
+- Separate again after the hit so the detector can re-arm cleanly.
 
 ## Common failure modes and quick fixes
 
@@ -48,7 +47,8 @@ This guide is optimized for a **2-minute live demo** during a research presentat
 
 - **Gestures visible, but few triggers**
   - Use larger, cleaner motion on the primary axis.
-  - For kick, move inward across the body rather than toward the camera.
+  - For kick, exaggerate the downward strike.
+  - For snare, bring the wrists genuinely close together rather than only crossing paths.
   - Try `--sensitivity expressive` for demos.
   - Confirm the configured active hand matches your performing hand.
 
@@ -89,8 +89,8 @@ Keyboard shortcuts while running:
 
 ### 0:45 - 1:15 (Gesture mapping)
 
-- Perform 3–4 clear inward side-jabs (kick).
-- Perform 3–4 clear downward strikes (snare).
+- Perform 3–4 clear downward strikes (kick).
+- Perform 3–4 clear wrist-collision snares.
 - Briefly state the mapping aloud as you perform.
 
 ### 1:15 - 1:45 (Mini groove)

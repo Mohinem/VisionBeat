@@ -4,6 +4,7 @@ VisionBeat now emits two complementary telemetry streams:
 
 1. **Structured application logs** for startup, shutdown, camera initialization, tracking failures, gesture candidates, confirmed triggers, and cooldown suppression.
 2. **Optional event logs** in **JSONL** or **CSV** for offline analysis of false positives, missed gestures, and end-to-end latency.
+3. **Optional session bundles** for research replay. These can store normalized tracker outputs, raw camera frames, or both, together with the effective config and confirmed trigger events.
 
 ## Configuration
 
@@ -16,11 +17,31 @@ logging:
   structured: true
   event_log_path: logs/visionbeat-events.jsonl
   event_log_format: jsonl
+  session_recording_path: logs/sessions
+  session_recording_mode: both
 ```
 
 - `structured`: appends machine-readable JSON payloads to standard log lines.
 - `event_log_path`: when set, writes gesture-analysis events to disk.
 - `event_log_format`: choose `jsonl` or `csv`.
+- `session_recording_path`: when set, creates a timestamped session directory under that path.
+- `session_recording_mode`: choose `tracker_outputs`, `raw_frames`, or `both`.
+
+## Session bundle layout
+
+Each recorded session uses a directory named like `session-20260406T123456789012Z/` and includes:
+
+- `manifest.json`: schema version, recording mode, effective config, artifact list, and item counts.
+- `triggers.jsonl`: confirmed gesture events as serialized `GestureEvent` payloads.
+- `tracker_outputs.jsonl`: one normalized `TrackerOutput` payload per processed frame when tracker recording is enabled.
+- `camera_frames.jsonl`: per-frame metadata plus the relative file path of each saved raw frame when raw-frame recording is enabled.
+- `frames/*.npy`: lossless NumPy dumps of raw camera frames when raw-frame recording is enabled.
+
+This layout is intended for exact offline replay:
+
+- `tracker_outputs` mode supports detector-only replay.
+- `raw_frames` mode preserves the original camera input for tracker-and-detector replay.
+- `both` mode keeps both representations in the same bundle for side-by-side evaluation.
 
 ## Structured log coverage
 
@@ -37,7 +58,7 @@ VisionBeat emits structured log payloads for:
 A typical trigger log line looks like this:
 
 ```text
-2026-03-23 12:00:00,000 | INFO | visionbeat.observability | Inward jab → kick | {"accepted":true,"confidence":0.94,"event":"gesture_trigger",...}
+2026-03-23 12:00:00,000 | INFO | visionbeat.observability | Downward strike → kick | {"accepted":true,"confidence":0.94,"event":"gesture_trigger",...}
 ```
 
 ## Event schema
@@ -56,7 +77,7 @@ VisionBeat also records `event_kind` and `hand` to help separate candidate, conf
 ### JSONL example
 
 ```json
-{"timestamp": 12.5, "event_kind": "trigger", "gesture_type": "kick", "accepted": true, "reason": "Inward jab → kick", "velocity_stats": {"elapsed": 0.10, "delta_x": -0.08, "delta_y": 0.04, "delta_z": -0.01, "net_velocity": 1.30, "peak_x_velocity": -0.72, "peak_y_velocity": 0.18, "peak_z_velocity": -0.05}, "confidence": 0.94, "hand": "right"}
+{"timestamp": 12.5, "event_kind": "trigger", "gesture_type": "kick", "accepted": true, "reason": "Downward strike → kick", "velocity_stats": {"elapsed": 0.10, "delta_x": 0.01, "delta_y": 0.20, "delta_z": -0.01, "net_velocity": 2.20, "peak_x_velocity": 0.10, "peak_y_velocity": 2.10, "peak_z_velocity": -0.05}, "confidence": 0.94, "hand": "right"}
 ```
 
 ### CSV columns
@@ -81,8 +102,8 @@ Use the event log to answer these questions:
    - Filter `accepted == true` to isolate confirmed triggers.
    - Candidate rows always carry `accepted == false`; only `event_kind == trigger` means audio should have fired.
 2. **Which threshold was most likely exceeded?**
-   - Large inward `delta_x`/`peak_x_velocity` magnitudes suggest a kick-like inward jab.
-   - High positive `delta_y` and `peak_y_velocity` suggest a snare-like downward strike.
+   - High positive `delta_y` and `peak_y_velocity` suggest a kick-like downward strike.
+   - Shrinking bilateral gap values with strong closing velocity suggest a snare-like wrist collision.
 3. **Was a repeated hit intentionally blocked?**
    - Look for `event_kind == cooldown_suppressed` with reason `cooldown_active`.
 4. **Was bad tracking the real culprit?**

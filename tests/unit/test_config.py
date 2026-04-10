@@ -33,6 +33,10 @@ def test_load_config_supports_nested_yaml_sections() -> None:
     assert config.gestures.thresholds.punch_forward_delta_z == pytest.approx(0.006)
     assert config.gestures.thresholds.punch_max_vertical_drift == pytest.approx(0.75)
     assert config.gestures.thresholds.strike_down_delta_y == pytest.approx(0.15)
+    assert config.gestures.thresholds.strike_confirmation_ratio == pytest.approx(0.65)
+    assert config.gestures.thresholds.snare_collision_distance == pytest.approx(0.24)
+    assert config.gestures.thresholds.snare_confirmation_velocity_ratio == pytest.approx(0.9)
+    assert config.gestures.thresholds.snare_collision_max_depth_gap == pytest.approx(0.22)
     assert config.gestures.thresholds.axis_dominance_ratio == pytest.approx(1.2)
     assert config.gestures.cooldowns.trigger_seconds == pytest.approx(0.2)
     assert config.gestures.cooldowns.analysis_window_seconds == pytest.approx(0.24)
@@ -49,6 +53,8 @@ def test_load_config_supports_nested_yaml_sections() -> None:
     assert config.logging.structured is True
     assert config.logging.event_log_path is None
     assert config.logging.event_log_format == "jsonl"
+    assert config.logging.session_recording_path is None
+    assert config.logging.session_recording_mode == "tracker_outputs"
 
 
 def test_load_config_supports_toml_with_nested_sections(tmp_path: Path) -> None:
@@ -80,6 +86,8 @@ level = "debug"
 structured = false
 event_log_path = "logs/events.csv"
 event_log_format = "csv"
+session_recording_path = "logs/sessions"
+session_recording_mode = "both"
 """.strip(),
         encoding="utf-8",
     )
@@ -95,6 +103,8 @@ event_log_format = "csv"
     assert config.logging.structured is False
     assert config.logging.event_log_path == "logs/events.csv"
     assert config.logging.event_log_format == "csv"
+    assert config.logging.session_recording_path == "logs/sessions"
+    assert config.logging.session_recording_mode == "both"
 
 
 @pytest.mark.parametrize(
@@ -134,7 +144,11 @@ event_log_format = "csv"
         (TransportConfig.from_mapping, {"backend": "udp", "port": 9100}, TransportConfig),
         (OverlayConfig.from_dict, {"draw_landmarks": False}, OverlayConfig),
         (DebugConfig.from_mapping, {"overlays": {"show_debug_panel": False}}, DebugConfig),
-        (LoggingConfig.from_mapping, {"level": "debug"}, LoggingConfig),
+        (
+            LoggingConfig.from_mapping,
+            {"level": "debug", "session_recording_mode": "raw_frames"},
+            LoggingConfig,
+        ),
     ],
 )
 def test_config_models_accept_valid_payloads(
@@ -182,6 +196,15 @@ def test_tracker_config_validation_errors(payload: dict[str, object], message: s
     ("payload", "message"),
     [
         ({"candidate_ratio": 0.0}, "gestures.thresholds.candidate_ratio: must be greater than 0.0"),
+        (
+            {"strike_confirmation_ratio": 1.1},
+            "gestures.thresholds.strike_confirmation_ratio: must be less than or equal to 1.0",
+        ),
+        (
+            {"snare_confirmation_velocity_ratio": 1.1},
+            "gestures.thresholds.snare_confirmation_velocity_ratio: "
+            "must be less than or equal to 1.0",
+        ),
         (
             {"axis_dominance_ratio": 0.9},
             "gestures.thresholds.axis_dominance_ratio: must be greater than or equal to 1.0",
@@ -258,6 +281,7 @@ def test_transport_config_validation_errors(payload: dict[str, object], message:
     ("payload", "message"),
     [
         ({"level": "info", "event_log_format": "parquet"}, "logging.event_log_format"),
+        ({"session_recording_mode": "frames"}, "logging.session_recording_mode"),
         ({"structured": "yes"}, "logging.structured: expected a boolean"),
     ],
 )
@@ -285,6 +309,11 @@ def test_logging_config_validation_errors(payload: dict[str, object], message: s
         (
             "logging:\n  event_log_format: parquet\n",
             "logging.event_log_format: must be either 'jsonl' or 'csv'",
+        ),
+        (
+            "logging:\n  session_recording_mode: frames\n",
+            "logging.session_recording_mode: must be one of "
+            "'tracker_outputs', 'raw_frames', or 'both'",
         ),
     ],
 )

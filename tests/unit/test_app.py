@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -178,6 +179,31 @@ class FakeRecorder:
         self.close_calls += 1
 
 
+class FakeSessionRecorder:
+    def __init__(self) -> None:
+        self.session_dir = Path("/tmp/fake-session")
+        self.camera_frames: list[CameraFrame] = []
+        self.tracker_outputs: list[tuple[CameraFrame, TrackerOutput]] = []
+        self.triggers: list[GestureEvent] = []
+        self.close_calls = 0
+
+    def record_camera_frame(self, camera_frame: CameraFrame) -> None:
+        self.camera_frames.append(camera_frame)
+
+    def record_tracker_output(
+        self,
+        camera_frame: CameraFrame,
+        tracker_output: TrackerOutput,
+    ) -> None:
+        self.tracker_outputs.append((camera_frame, tracker_output))
+
+    def record_trigger(self, event: GestureEvent) -> None:
+        self.triggers.append(event)
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
 def make_pose(
     timestamp: float,
     *,
@@ -252,6 +278,44 @@ def test_runtime_orchestrates_tracking_detection_audio_and_overlay() -> None:
     assert preview.show_calls == [("VisionBeat", "rendered:7")]
 
 
+def test_runtime_records_session_data_for_replay() -> None:
+    frame = FakeFrame("frame-0")
+    camera_frame = CameraFrame(image=frame, captured_at=1.0, frame_index=7)
+    camera = FakeCamera([camera_frame])
+    pose = make_pose(1.0)
+    tracker = FakeTracker([pose])
+    event = GestureEvent(
+        gesture=GestureType.KICK,
+        confidence=0.91,
+        hand="right",
+        timestamp=FrameTimestamp(seconds=1.0),
+        label="Inward jab → kick",
+    )
+    detector = FakeDetector(
+        events_by_frame=[[event]],
+        candidates_by_frame=[()],
+        cooldowns=[0.08],
+    )
+    session_recorder = FakeSessionRecorder()
+    runtime = VisionBeatRuntime(
+        config=AppConfig(),
+        camera=camera,
+        tracker=tracker,
+        detector=detector,
+        audio=FakeAudio(),
+        transport=FakeTransport(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False]),
+        session_recorder=session_recorder,
+    )
+
+    runtime.process_next_frame()
+
+    assert session_recorder.camera_frames == [camera_frame]
+    assert session_recorder.tracker_outputs == [(camera_frame, pose)]
+    assert session_recorder.triggers == [event]
+
+
 def test_runtime_tracks_on_raw_frame_and_renders_mirrored_preview() -> None:
     raw_frame = FakeFrame("raw-frame")
     mirrored_frame = FakeFrame("mirrored-frame")
@@ -305,6 +369,7 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
     transport = FakeTransport()
     preview = FakePreview([False, True])
     recorder = FakeRecorder()
+    session_recorder = FakeSessionRecorder()
     runtime = VisionBeatRuntime(
         config=AppConfig(),
         camera=camera,
@@ -315,6 +380,7 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
         overlay=overlay,
         preview=preview,
         recorder=recorder,
+        session_recorder=session_recorder,
     )
 
     runtime.run()
@@ -329,6 +395,7 @@ def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:
     assert audio.close_calls == 1
     assert transport.close_calls == 1
     assert preview.close_calls == 1
+    assert session_recorder.close_calls == 1
     assert len(overlay.calls) == 2
     assert overlay.calls[1][1].fps == pytest.approx(10.0)
     assert overlay.overlay_enabled == [True]

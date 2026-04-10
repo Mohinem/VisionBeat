@@ -82,6 +82,7 @@ def _apply_sensitivity_preset(config: AppConfig, preset: str) -> AppConfig:
             thresholds,
             punch_forward_delta_z=thresholds.punch_forward_delta_z * 1.15,
             strike_down_delta_y=thresholds.strike_down_delta_y * 1.15,
+            snare_collision_distance=thresholds.snare_collision_distance * 0.9,
             min_velocity=thresholds.min_velocity * 1.1,
             axis_dominance_ratio=thresholds.axis_dominance_ratio * 1.1,
         )
@@ -90,6 +91,7 @@ def _apply_sensitivity_preset(config: AppConfig, preset: str) -> AppConfig:
             thresholds,
             punch_forward_delta_z=thresholds.punch_forward_delta_z * 0.88,
             strike_down_delta_y=thresholds.strike_down_delta_y * 0.88,
+            snare_collision_distance=thresholds.snare_collision_distance * 1.1,
             min_velocity=thresholds.min_velocity * 0.9,
             axis_dominance_ratio=max(1.0, thresholds.axis_dominance_ratio * 0.9),
         )

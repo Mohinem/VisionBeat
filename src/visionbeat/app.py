@@ -20,6 +20,7 @@ from visionbeat.models import (
 from visionbeat.observability import ObservabilityRecorder, build_observability_recorder
 from visionbeat.overlay import OverlayRenderer
 from visionbeat.pose_provider import PoseProvider, create_pose_provider
+from visionbeat.session_recording import SessionRecorder, build_session_recorder
 from visionbeat.transport import (
     GestureEventTransport,
     NullGestureEventTransport,
@@ -98,6 +99,7 @@ class VisionBeatRuntime:
     preview: PreviewWindow
     transport: GestureEventTransport = field(default_factory=NullGestureEventTransport)
     recorder: ObservabilityRecorder | None = None
+    session_recorder: SessionRecorder | None = None
     overlay_toggle_key: int = ord("o")
     debug_toggle_key: int = ord("d")
     _last_confirmed_gesture: GestureEvent | None = field(default=None, init=False)
@@ -127,8 +129,12 @@ class VisionBeatRuntime:
     def process_next_frame(self) -> bool:
         """Process one frame and return whether the runtime should continue."""
         camera_frame = self.camera.read_frame()
+        if self.session_recorder is not None:
+            self.session_recorder.record_camera_frame(camera_frame)
         timestamp = FrameTimestamp(seconds=camera_frame.captured_at)
         pose = self.tracker.process(camera_frame.image, timestamp)
+        if self.session_recorder is not None:
+            self.session_recorder.record_tracker_output(camera_frame, pose)
         events = list(self.detector.update(pose))
         current_candidate = self._select_candidate()
         display_pose = self._pose_for_display(pose, mirrored=camera_frame.mirrored_for_display)
@@ -254,6 +260,8 @@ class VisionBeatRuntime:
             event.timestamp.seconds,
         )
         self._last_confirmed_gesture = event
+        if self.session_recorder is not None:
+            self.session_recorder.record_trigger(event)
         self.audio.trigger(
             AudioTrigger(
                 gesture=event.gesture,
@@ -273,6 +281,8 @@ class VisionBeatRuntime:
         self.audio.close()
         self.transport.close()
         self.preview.close()
+        if self.session_recorder is not None:
+            self.session_recorder.close()
         if self.recorder is not None:
             self.recorder.close()
 
@@ -288,6 +298,7 @@ class VisionBeatApp:
     tracker: PoseProvider = field(init=False)
     detector: GestureDetector = field(init=False)
     recorder: ObservabilityRecorder = field(init=False)
+    session_recorder: SessionRecorder | None = field(init=False, default=None)
     audio: AudioEngine = field(init=False)
     transport: GestureEventTransport = field(init=False)
     overlay: OverlayRenderer = field(init=False)
@@ -301,6 +312,10 @@ class VisionBeatApp:
         if len(self.debug_toggle_key) != 1:
             raise ValueError("debug_toggle_key must be a single character.")
         self.recorder = build_observability_recorder(self.config.logging)
+        self.session_recorder = build_session_recorder(
+            self.config.logging,
+            config_payload=self.config.to_dict(),
+        )
         self.camera = CameraSource(self.config.camera, recorder=self.recorder)
         self.tracker = create_pose_provider(self.config.tracker)
         self.detector = GestureDetector(self.config.gestures, observer=self.recorder)
@@ -325,6 +340,16 @@ class VisionBeatApp:
                 "audio_status": self._audio_status(),
                 "event_log_format": self.config.logging.event_log_format,
                 "event_log_path": self.config.logging.event_log_path,
+                "session_recording_mode": (
+                    None
+                    if self.session_recorder is None
+                    else self.config.logging.session_recording_mode
+                ),
+                "session_recording_path": (
+                    None
+                    if self.session_recorder is None
+                    else self.session_recorder.session_dir.as_posix()
+                ),
             }
         )
         self.runtime = VisionBeatRuntime(
@@ -337,6 +362,7 @@ class VisionBeatApp:
             overlay=self.overlay,
             preview=self.preview,
             recorder=self.recorder,
+            session_recorder=self.session_recorder,
             overlay_toggle_key=ord(self.overlay_toggle_key.lower()),
             debug_toggle_key=ord(self.debug_toggle_key.lower()),
         )
