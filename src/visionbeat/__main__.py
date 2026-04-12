@@ -68,6 +68,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="d",
         help="Single-character keyboard shortcut for toggling debug panel (default: d).",
     )
+    parser.add_argument(
+        "--skeleton-only-hud",
+        action="store_true",
+        help=(
+            "Show only skeleton landmarks in the preview HUD for dataset capture; "
+            "hide text panels, landmark labels, and trigger flashes."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -105,6 +113,7 @@ def build_config(
     pose_backend: str | None = None,
     debug: bool = False,
     no_debug: bool = False,
+    skeleton_only_hud: bool = False,
     sensitivity: str = "balanced",
 ) -> AppConfig:
     """Load application configuration and apply CLI overrides."""
@@ -130,6 +139,20 @@ def build_config(
                 overlays=replace(config.debug.overlays, show_debug_panel=False),
             ),
         )
+    if skeleton_only_hud:
+        config = replace(
+            config,
+            debug=replace(
+                config.debug,
+                overlays=replace(
+                    config.debug.overlays,
+                    draw_landmarks=True,
+                    show_landmark_labels=False,
+                    show_debug_panel=False,
+                    show_trigger_flash=False,
+                ),
+            ),
+        )
     return _apply_sensitivity_preset(config, sensitivity)
 
 
@@ -143,6 +166,7 @@ def main(argv: list[str] | None = None) -> None:
             pose_backend=args.pose_backend,
             debug=args.debug,
             no_debug=args.no_debug,
+            skeleton_only_hud=args.skeleton_only_hud,
             sensitivity=args.sensitivity,
         )
         configure_logging(

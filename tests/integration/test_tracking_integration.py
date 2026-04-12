@@ -39,6 +39,7 @@ class FakeCV2:
     CAP_PROP_FRAME_WIDTH = 3
     CAP_PROP_FRAME_HEIGHT = 4
     CAP_PROP_FPS = 5
+    CAP_PROP_BUFFERSIZE = 6
     COLOR_BGR2RGB = 99
 
     def __init__(self, capture: FakeCapture) -> None:
@@ -87,7 +88,7 @@ def test_webcam_capture_scaffolding_allows_camera_source_without_hardware(monkey
     assert frame.display_image == ("flipped", "frame-0", 1)
     assert frame.mirrored_for_display is True
     assert frame.frame_index == 0
-    assert fake_capture.properties == [(3, 640), (4, 480), (5, 24)]
+    assert fake_capture.properties == [(3, 640), (4, 480), (5, 24), (6, 1)]
     assert fake_capture.released is True
 
 

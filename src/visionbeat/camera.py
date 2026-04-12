@@ -13,6 +13,7 @@ from visionbeat.observability import ObservabilityRecorder
 
 logger = logging.getLogger(__name__)
 Frame = Any
+_LATEST_FRAME_BUFFER_SIZE = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,11 @@ class CameraSource(CameraSourceProtocol):
         self._capture.set(self._cv2.CAP_PROP_FRAME_WIDTH, self.config.width)
         self._capture.set(self._cv2.CAP_PROP_FRAME_HEIGHT, self.config.height)
         self._capture.set(self._cv2.CAP_PROP_FPS, self.config.fps)
+        buffer_size_property = getattr(self._cv2, "CAP_PROP_BUFFERSIZE", None)
+        if buffer_size_property is not None:
+            # Ask OpenCV to keep the capture queue shallow so the runtime processes
+            # the newest frame instead of building perceptible lag behind the camera.
+            self._capture.set(buffer_size_property, _LATEST_FRAME_BUFFER_SIZE)
         if not self._capture.isOpened():
             if self.recorder is not None:
                 self.recorder.log_camera_initialization(

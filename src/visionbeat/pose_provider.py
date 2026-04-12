@@ -36,6 +36,28 @@ class PoseProvider(ABC):
         """Release native resources held by the backend."""
 
 
+def resize_frame_for_tracking(frame: Frame, *, cv2_module: Any, max_input_width: int) -> Frame:
+    """Downscale wide frames before inference to reduce tracker cost."""
+    if max_input_width <= 0:
+        return frame
+
+    shape = getattr(frame, "shape", None)
+    if shape is None or len(shape) < 2:
+        return frame
+
+    frame_height = int(shape[0])
+    frame_width = int(shape[1])
+    if frame_width <= max_input_width:
+        return frame
+
+    resize = getattr(cv2_module, "resize", None)
+    if not callable(resize):
+        return frame
+
+    resized_height = max(1, int(round(frame_height * (max_input_width / frame_width))))
+    return resize(frame, (max_input_width, resized_height))
+
+
 def create_pose_provider(config: TrackerConfig) -> PoseProvider:
     """Create the configured pose backend implementation."""
     backend = config.backend.lower()

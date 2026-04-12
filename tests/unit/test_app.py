@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -428,6 +428,32 @@ def test_runtime_supports_overlay_toggle_shortcuts() -> None:
 
     assert runtime.overlay.overlay_enabled == [True, False]
     assert runtime.overlay.debug_enabled == [True, False]
+
+
+def test_runtime_ignores_debug_toggle_when_debug_panel_disabled() -> None:
+    config = AppConfig()
+    config = replace(
+        config,
+        debug=replace(
+            config.debug,
+            overlays=replace(config.debug.overlays, show_debug_panel=False),
+        ),
+    )
+    runtime = VisionBeatRuntime(
+        config=config,
+        camera=FakeCamera(
+            [CameraFrame(image=FakeFrame("frame-0"), captured_at=1.0, frame_index=0)]
+        ),
+        tracker=FakeTracker([make_pose(1.0)]),
+        detector=FakeDetector(events_by_frame=[[]], candidates_by_frame=[()], cooldowns=[0.0]),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([True], key_sequence=[ord("d")]),
+    )
+
+    runtime.run()
+
+    assert runtime.overlay.debug_enabled == [False]
 
 
 def test_runtime_keeps_last_confirmed_gesture_visible_until_replaced() -> None:

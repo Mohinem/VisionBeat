@@ -14,7 +14,11 @@ import numpy as np
 
 from visionbeat.config import TrackerConfig
 from visionbeat.models import FrameTimestamp, LandmarkPoint, TrackerOutput
-from visionbeat.pose_provider import PoseBackendUnavailableError, PoseProvider
+from visionbeat.pose_provider import (
+    PoseBackendUnavailableError,
+    PoseProvider,
+    resize_frame_for_tracking,
+)
 
 logger = logging.getLogger(__name__)
 Frame = Any
@@ -138,7 +142,12 @@ class MoveNetPoseProvider(PoseProvider):
             if isinstance(timestamp, FrameTimestamp)
             else FrameTimestamp(seconds=timestamp)
         )
-        rgb_frame = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
+        tracking_frame = resize_frame_for_tracking(
+            frame,
+            cv2_module=self._cv2,
+            max_input_width=self.config.max_input_width,
+        )
+        rgb_frame = self._cv2.cvtColor(tracking_frame, self._cv2.COLOR_BGR2RGB)
         input_tensor, scale, pad_top, pad_left = self._prepare_input(rgb_frame)
 
         self._interpreter.set_tensor(self._input_details["index"], input_tensor)
