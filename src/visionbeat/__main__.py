@@ -72,8 +72,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--skeleton-only-hud",
         action="store_true",
         help=(
-            "Show only skeleton landmarks in the preview HUD for dataset capture; "
-            "hide text panels, landmark labels, and trigger flashes."
+            "Show only the skeleton overlay in the preview HUD for dataset capture; "
+            "hide text panels and trigger flashes while keeping landmark labels."
         ),
     )
     return parser.parse_args(argv)
@@ -147,7 +147,7 @@ def build_config(
                 overlays=replace(
                     config.debug.overlays,
                     draw_landmarks=True,
-                    show_landmark_labels=False,
+                    show_landmark_labels=True,
                     show_debug_panel=False,
                     show_trigger_flash=False,
                 ),

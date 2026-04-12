@@ -103,11 +103,11 @@ def test_overlay_renderer_renders_debug_panel_without_events() -> None:
     assert output is not frame
 
 
-def test_overlay_renderer_skeleton_only_hud_preserves_skeleton_without_annotations() -> None:
+def test_overlay_renderer_skeleton_only_hud_preserves_landmark_labels_without_panels() -> None:
     fake_cv2 = FakeCV2()
     renderer = OverlayRenderer(
         OverlayConfig(
-            show_landmark_labels=False,
+            show_landmark_labels=True,
             show_debug_panel=False,
             show_trigger_flash=False,
         ),
@@ -134,7 +134,10 @@ def test_overlay_renderer_skeleton_only_hud_preserves_skeleton_without_annotatio
     assert any(name == "line" for name, _ in fake_cv2.calls)
     assert any(name == "circle" for name, _ in fake_cv2.calls)
     assert not any(name == "rectangle" for name, _ in fake_cv2.calls)
-    assert not any(name == "putText" for name, _ in fake_cv2.calls)
+    assert any(
+        name == "putText" and args[1] == "left shoulder"
+        for name, args in fake_cv2.calls
+    )
 
 
 def test_draw_trigger_flash_renders_centered_red_block_with_sound_name() -> None:

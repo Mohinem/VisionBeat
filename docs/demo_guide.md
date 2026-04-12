@@ -76,7 +76,7 @@ Keyboard shortcuts while running:
 - `d` → toggle debug panel,
 - `q` or `Esc` → quit.
 
-For dataset capture, start with `--skeleton-only-hud` to hide debug text, landmark labels, and trigger flashes while keeping the skeleton overlay.
+For dataset capture, start with `--skeleton-only-hud` to hide debug text and trigger flashes while keeping the skeleton overlay and landmark labels.
 
 ## Recommended 2-minute demo script
 

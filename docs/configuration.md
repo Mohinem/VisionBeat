@@ -21,7 +21,7 @@ Or override the camera index from the CLI:
 visionbeat --config configs/default.yaml --camera-index 1
 ```
 
-For dataset capture, keep only the tracked skeleton HUD:
+For dataset capture, keep only the tracked skeleton HUD with landmark labels:
 
 ```bash
 visionbeat --config configs/default.yaml --skeleton-only-hud

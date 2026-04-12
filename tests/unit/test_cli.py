@@ -100,7 +100,7 @@ def test_build_config_applies_skeleton_only_hud_override(tmp_path: Path) -> None
 
     assert config.logging.level == "DEBUG"
     assert config.debug.overlays.draw_landmarks is True
-    assert config.debug.overlays.show_landmark_labels is False
+    assert config.debug.overlays.show_landmark_labels is True
     assert config.debug.overlays.show_debug_panel is False
     assert config.debug.overlays.show_trigger_flash is False
 
