@@ -269,6 +269,127 @@ def test_snare_collision_velocity_confirmation_threshold_is_stable(
     assert detector._is_snare_confirmed(metrics) is expected_confirmed
 
 
+def test_kick_detection_accepts_strong_strike_when_net_velocity_softens() -> None:
+    detector = GestureDetector(
+        GestureConfig(
+            thresholds=GestureThresholdsConfig(
+                strike_down_delta_y=0.06,
+                strike_confirmation_ratio=0.4,
+                strike_max_depth_drift=0.24,
+                min_velocity=0.37,
+                candidate_ratio=0.6,
+                axis_dominance_ratio=1.0,
+            )
+        )
+    )
+    metrics = MotionMetrics(
+        elapsed=0.18,
+        delta_x=0.01,
+        delta_abs_x=0.01,
+        delta_y=detector.config.strike_down_delta_y * 0.62,
+        delta_z=0.02,
+        net_velocity=detector.config.min_velocity * 0.28,
+        peak_x_velocity=0.10,
+        peak_abs_x_velocity=0.10,
+        peak_y_velocity=detector.config.min_velocity * 0.74,
+        peak_z_velocity=0.10,
+    )
+
+    assert detector._meets_kick_candidate(metrics) is True
+    assert detector._is_kick_confirmed(metrics) is True
+
+
+def test_default_kick_threshold_now_confirms_milder_downward_strike() -> None:
+    detector = GestureDetector(GestureConfig())
+    metrics = MotionMetrics(
+        elapsed=0.18,
+        delta_x=0.02,
+        delta_abs_x=0.02,
+        delta_y=0.042,
+        delta_z=0.01,
+        net_velocity=0.15,
+        peak_x_velocity=0.09,
+        peak_abs_x_velocity=0.09,
+        peak_y_velocity=0.27,
+        peak_z_velocity=0.07,
+    )
+
+    assert detector._meets_kick_candidate(metrics) is True
+    assert detector._is_kick_confirmed(metrics) is True
+
+
+def test_default_kick_threshold_now_tolerates_more_lateral_drift() -> None:
+    detector = GestureDetector(GestureConfig())
+    metrics = MotionMetrics(
+        elapsed=0.18,
+        delta_x=0.05,
+        delta_abs_x=0.05,
+        delta_y=0.05,
+        delta_z=0.03,
+        net_velocity=0.19,
+        peak_x_velocity=0.10,
+        peak_abs_x_velocity=0.10,
+        peak_y_velocity=0.30,
+        peak_z_velocity=0.08,
+    )
+
+    assert detector._meets_kick_candidate(metrics) is True
+    assert detector._is_kick_confirmed(metrics) is True
+
+
+def test_default_kick_threshold_now_tolerates_more_depth_drift() -> None:
+    detector = GestureDetector(GestureConfig())
+    metrics = MotionMetrics(
+        elapsed=0.18,
+        delta_x=0.0,
+        delta_abs_x=0.0,
+        delta_y=0.13,
+        delta_z=0.19,
+        net_velocity=0.28,
+        peak_x_velocity=0.04,
+        peak_abs_x_velocity=0.04,
+        peak_y_velocity=0.31,
+        peak_z_velocity=0.16,
+    )
+
+    assert detector._meets_kick_candidate(metrics) is True
+    assert detector._is_kick_confirmed(metrics) is True
+
+
+def test_snare_confirmation_accepts_strong_closing_peak_when_net_velocity_softens() -> None:
+    detector = GestureDetector(
+        GestureConfig(
+            thresholds=GestureThresholdsConfig(
+                snare_collision_distance=0.12,
+                snare_confirmation_velocity_ratio=0.8,
+                snare_collision_max_depth_gap=0.10,
+                min_velocity=0.5,
+                candidate_ratio=0.7,
+            )
+        )
+    )
+    confirmation_velocity = (
+        detector.config.min_velocity * detector.config.snare_confirmation_velocity_ratio
+    )
+    metrics = WristCollisionMetrics(
+        elapsed=0.10,
+        delta_x_gap=-0.12,
+        delta_y_gap=0.0,
+        delta_z_gap=0.0,
+        delta_distance_xy=-0.12,
+        current_distance_xy=0.10,
+        current_depth_gap=0.02,
+        net_velocity=detector.config.min_velocity * 0.84,
+        peak_x_velocity=-(confirmation_velocity * 1.05),
+        peak_y_velocity=0.0,
+        peak_z_velocity=0.0,
+        peak_distance_velocity=-(confirmation_velocity * 1.05),
+    )
+
+    assert detector._meets_snare_candidate(metrics) is True
+    assert detector._is_snare_confirmed(metrics) is True
+
+
 def test_inward_jab_no_longer_triggers(
     motion_sequences: dict[str, tuple[tuple[float, tuple[float, float, float]], ...]],
     sequence_to_frames,
@@ -287,7 +408,7 @@ def test_collision_candidate_blocks_simultaneous_kick(
     detector = GestureDetector(
         GestureConfig(
             thresholds=GestureThresholdsConfig(
-                strike_down_delta_y=0.15,
+                strike_down_delta_y=0.12,
                 snare_collision_distance=0.12,
                 min_velocity=0.39,
                 candidate_ratio=0.6,
@@ -424,6 +545,7 @@ def test_low_visibility_clears_pending_candidate(
         GestureConfig(
             thresholds=GestureThresholdsConfig(
                 strike_down_delta_y=0.20,
+                strike_confirmation_ratio=1.0,
                 strike_max_depth_drift=0.18,
                 min_velocity=0.45,
                 candidate_ratio=0.6,
@@ -438,7 +560,7 @@ def test_low_visibility_clears_pending_candidate(
     )
     candidate_frames = (
         (0.00, (0.55, 0.20, -0.05)),
-        (0.20, (0.56, 0.33, -0.055)),
+        (0.30, (0.56, 0.33, -0.055)),
     )
 
     for timestamp, wrist in candidate_frames:
@@ -463,6 +585,7 @@ def test_candidate_expires_when_confirmation_window_is_exceeded(
         GestureConfig(
             thresholds=GestureThresholdsConfig(
                 strike_down_delta_y=0.20,
+                strike_confirmation_ratio=1.0,
                 strike_max_depth_drift=0.18,
                 min_velocity=0.45,
                 candidate_ratio=0.6,
@@ -476,7 +599,7 @@ def test_candidate_expires_when_confirmation_window_is_exceeded(
         )
     )
     detector.update(tracker_output_factory(0.00, right_wrist=(0.55, 0.20, -0.05)))
-    detector.update(tracker_output_factory(0.20, right_wrist=(0.56, 0.33, -0.055)))
+    detector.update(tracker_output_factory(0.30, right_wrist=(0.56, 0.33, -0.055)))
 
     candidate = detector.candidates[0]
     events = detector.update(tracker_output_factory(0.40, right_wrist=(0.56, 0.23, -0.055)))

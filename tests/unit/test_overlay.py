@@ -71,6 +71,18 @@ def test_draw_pose_landmarks_uses_helper_primitives() -> None:
     assert any(name == "line" for name, _ in fake_cv2.calls)
 
 
+def test_draw_pose_landmarks_can_hide_landmark_labels() -> None:
+    frame = FakeFrame(100, 200)
+    fake_cv2 = FakeCV2()
+
+    result = draw_pose_landmarks(frame, make_pose(), cv2_module=fake_cv2, show_labels=False)
+
+    assert result is frame
+    assert any(name == "circle" for name, _ in fake_cv2.calls)
+    assert any(name == "line" for name, _ in fake_cv2.calls)
+    assert not any(name == "putText" for name, _ in fake_cv2.calls)
+
+
 def test_draw_labels_skips_empty_entries() -> None:
     frame = FakeFrame(50, 50)
     fake_cv2 = FakeCV2()
@@ -89,6 +101,40 @@ def test_overlay_renderer_renders_debug_panel_without_events() -> None:
 
     assert output.shape == frame.shape
     assert output is not frame
+
+
+def test_overlay_renderer_skeleton_only_hud_preserves_skeleton_without_annotations() -> None:
+    fake_cv2 = FakeCV2()
+    renderer = OverlayRenderer(
+        OverlayConfig(
+            show_landmark_labels=False,
+            show_debug_panel=False,
+            show_trigger_flash=False,
+        ),
+        cv2_module=fake_cv2,
+    )
+    renderer.set_debug_enabled(True)
+    frame = FakeFrame(120, 160)
+    pose = make_pose()
+    state = RenderState(
+        pose=pose,
+        frame_index=0,
+        confirmed_gesture=GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.9,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=0.95),
+            label="Downward strike -> kick",
+        ),
+    )
+
+    output = renderer.render(frame, state)
+
+    assert output is not frame
+    assert any(name == "line" for name, _ in fake_cv2.calls)
+    assert any(name == "circle" for name, _ in fake_cv2.calls)
+    assert not any(name == "rectangle" for name, _ in fake_cv2.calls)
+    assert not any(name == "putText" for name, _ in fake_cv2.calls)
 
 
 def test_draw_trigger_flash_renders_centered_red_block_with_sound_name() -> None:

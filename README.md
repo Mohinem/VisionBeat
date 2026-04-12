@@ -141,6 +141,12 @@ The pose backend is now selectable at runtime:
 visionbeat --config configs/default.yaml --pose-backend mediapipe
 ```
 
+For dataset capture, hide HUD text and trigger flashes while keeping the skeleton:
+
+```bash
+visionbeat --config configs/default.yaml --skeleton-only-hud
+```
+
 Press `q` or `Esc` to exit.
 
 ## Pose backends

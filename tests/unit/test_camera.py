@@ -30,6 +30,7 @@ class FakeCV2:
     CAP_PROP_FRAME_WIDTH = 3
     CAP_PROP_FRAME_HEIGHT = 4
     CAP_PROP_FPS = 5
+    CAP_PROP_BUFFERSIZE = 6
 
     def __init__(self, capture: FakeCapture) -> None:
         self.capture = capture
@@ -55,7 +56,7 @@ def test_camera_source_open_and_read_frame() -> None:
     assert frame.display_image == ("flipped", "frame-a", 1)
     assert frame.mirrored_for_display is True
     assert frame.frame_index == 0
-    assert capture.properties == [(3, 1280), (4, 720), (5, 30)]
+    assert capture.properties == [(3, 1280), (4, 720), (5, 30), (6, 1)]
 
 
 def test_camera_source_raises_when_device_cannot_open() -> None:

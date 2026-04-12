@@ -84,7 +84,9 @@ class OverlayRenderer:
         """Store overlay configuration and an optional OpenCV-compatible module."""
         self.config = config
         self._cv2 = cv2_module
-        self._overlay_enabled = config.draw_landmarks or config.show_debug_panel
+        self._overlay_enabled = (
+            config.draw_landmarks or config.show_debug_panel or config.show_trigger_flash
+        )
         self._debug_enabled = config.show_debug_panel
 
     def set_overlay_enabled(self, enabled: bool) -> None:
@@ -93,19 +95,24 @@ class OverlayRenderer:
 
     def set_debug_enabled(self, enabled: bool) -> None:
         """Enable or disable debug-panel rendering."""
-        self._debug_enabled = bool(enabled)
+        self._debug_enabled = bool(enabled) and self.config.show_debug_panel
 
     def render(self, frame: Frame, state: RenderState) -> Frame:
         """Render landmarks and runtime state onto a frame copy."""
         output = frame.copy()
 
         if self._overlay_enabled and self.config.draw_landmarks:
-            draw_pose_landmarks(output, state.pose, cv2_module=self._cv2)
+            draw_pose_landmarks(
+                output,
+                state.pose,
+                cv2_module=self._cv2,
+                show_labels=self.config.show_landmark_labels,
+            )
 
-        if self._overlay_enabled:
+        if self._overlay_enabled and self.config.show_trigger_flash:
             draw_trigger_flash(output, state, cv2_module=self._cv2)
 
-        if self._overlay_enabled and self._debug_enabled:
+        if self._overlay_enabled and self.config.show_debug_panel and self._debug_enabled:
             draw_labels(output, _build_debug_labels(state), cv2_module=self._cv2)
 
         return output
@@ -165,6 +172,7 @@ def draw_pose_landmarks(
     pose: Any,
     *,
     cv2_module: Cv2Protocol | None = None,
+    show_labels: bool = True,
 ) -> Frame:
     """Draw tracked upper-body landmarks and simple bone connections."""
     cv2 = _get_cv2_module(cv2_module)
@@ -186,6 +194,8 @@ def draw_pose_landmarks(
     for name, landmark in pose.landmarks.items():
         center = (int(landmark.x * width), int(landmark.y * height))
         cv2.circle(frame, center, 6, (50, 220, 120), -1)
+        if not show_labels:
+            continue
         cv2.putText(
             frame,
             name.replace("_", " "),

@@ -30,19 +30,22 @@ def test_load_config_supports_nested_yaml_sections() -> None:
 
     assert isinstance(config, AppConfig)
     assert config.camera.window_name == "VisionBeat"
+    assert config.tracker.model_complexity == 0
+    assert config.tracker.max_input_width == 640
     assert config.gestures.thresholds.punch_forward_delta_z == pytest.approx(0.006)
     assert config.gestures.thresholds.punch_max_vertical_drift == pytest.approx(0.75)
-    assert config.gestures.thresholds.strike_down_delta_y == pytest.approx(0.15)
-    assert config.gestures.thresholds.strike_confirmation_ratio == pytest.approx(0.65)
-    assert config.gestures.thresholds.snare_collision_distance == pytest.approx(0.24)
-    assert config.gestures.thresholds.snare_confirmation_velocity_ratio == pytest.approx(0.9)
-    assert config.gestures.thresholds.snare_collision_max_depth_gap == pytest.approx(0.22)
-    assert config.gestures.thresholds.axis_dominance_ratio == pytest.approx(1.2)
+    assert config.gestures.thresholds.strike_down_delta_y == pytest.approx(0.06)
+    assert config.gestures.thresholds.strike_confirmation_ratio == pytest.approx(0.4)
+    assert config.gestures.thresholds.strike_max_depth_drift == pytest.approx(0.24)
+    assert config.gestures.thresholds.snare_collision_distance == pytest.approx(0.26)
+    assert config.gestures.thresholds.snare_confirmation_velocity_ratio == pytest.approx(0.8)
+    assert config.gestures.thresholds.snare_collision_max_depth_gap == pytest.approx(0.24)
+    assert config.gestures.thresholds.axis_dominance_ratio == pytest.approx(1.0)
     assert config.gestures.cooldowns.trigger_seconds == pytest.approx(0.2)
-    assert config.gestures.cooldowns.analysis_window_seconds == pytest.approx(0.24)
-    assert config.gestures.cooldowns.confirmation_window_seconds == pytest.approx(0.18)
-    assert config.gestures.thresholds.min_velocity == pytest.approx(0.39)
-    assert config.gestures.velocity_smoothing_alpha == pytest.approx(0.55)
+    assert config.gestures.cooldowns.analysis_window_seconds == pytest.approx(0.18)
+    assert config.gestures.cooldowns.confirmation_window_seconds == pytest.approx(0.12)
+    assert config.gestures.thresholds.min_velocity == pytest.approx(0.37)
+    assert config.gestures.velocity_smoothing_alpha == pytest.approx(0.8)
     assert config.gestures.rearm_threshold_ratio == pytest.approx(0.45)
     assert config.audio.sample_mapping == {
         "kick": "assets/samples/kick.wav",
@@ -50,6 +53,8 @@ def test_load_config_supports_nested_yaml_sections() -> None:
     }
     assert config.debug.overlays.show_debug_panel is True
     assert config.logging.level == "INFO"
+    assert config.debug.overlays.show_landmark_labels is True
+    assert config.debug.overlays.show_trigger_flash is True
     assert config.logging.structured is True
     assert config.logging.event_log_path is None
     assert config.logging.event_log_format == "jsonl"
@@ -79,7 +84,9 @@ clap = "custom/clap.wav"
 
 [debug.overlays]
 draw_landmarks = false
+show_landmark_labels = false
 show_debug_panel = true
+show_trigger_flash = false
 
 [logging]
 level = "debug"
@@ -99,7 +106,9 @@ session_recording_mode = "both"
     assert config.gestures.cooldowns.trigger_seconds == pytest.approx(0.28)
     assert config.audio.sample_mapping["clap"] == "custom/clap.wav"
     assert config.debug.overlays.draw_landmarks is False
+    assert config.debug.overlays.show_landmark_labels is False
     assert config.logging.level == "DEBUG"
+    assert config.debug.overlays.show_trigger_flash is False
     assert config.logging.structured is False
     assert config.logging.event_log_path == "logs/events.csv"
     assert config.logging.event_log_format == "csv"
@@ -113,7 +122,12 @@ session_recording_mode = "both"
         (CameraConfig.from_dict, {"width": 1920, "height": 1080, "fps": 60}, CameraConfig),
         (
             TrackerConfig.from_dict,
-            {"backend": "movenet", "model_complexity": 2, "min_tracking_confidence": 0.6},
+            {
+                "backend": "movenet",
+                "model_complexity": 2,
+                "max_input_width": 512,
+                "min_tracking_confidence": 0.6,
+            },
             TrackerConfig,
         ),
         (
@@ -142,7 +156,11 @@ session_recording_mode = "both"
             AudioConfig,
         ),
         (TransportConfig.from_mapping, {"backend": "udp", "port": 9100}, TransportConfig),
-        (OverlayConfig.from_dict, {"draw_landmarks": False}, OverlayConfig),
+        (
+            OverlayConfig.from_dict,
+            {"draw_landmarks": False, "show_landmark_labels": False, "show_trigger_flash": False},
+            OverlayConfig,
+        ),
         (DebugConfig.from_mapping, {"overlays": {"show_debug_panel": False}}, DebugConfig),
         (
             LoggingConfig.from_mapping,
@@ -161,6 +179,7 @@ def test_config_models_accept_valid_payloads(
     assert isinstance(config, expected_type)
     if isinstance(config, TrackerConfig):
         assert config.backend == "movenet"
+        assert config.max_input_width == 512
 
 
 @pytest.mark.parametrize(
@@ -181,6 +200,7 @@ def test_camera_config_validation_errors(payload: dict[str, object], message: st
     [
         ({"model_complexity": 3}, "tracker.model_complexity: must be one of 0, 1, 2"),
         ({"backend": "openpose"}, "tracker.backend: must be either 'mediapipe' or 'movenet'."),
+        ({"max_input_width": -1}, "tracker.max_input_width: must be greater than or equal to 0"),
         (
             {"min_detection_confidence": 1.5},
             "tracker.min_detection_confidence: must be less than or equal to 1.0",

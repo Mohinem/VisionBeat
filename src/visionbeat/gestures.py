@@ -787,19 +787,33 @@ class GestureDetector:
             )
         )
 
+    def _kick_candidate_velocity_threshold(self) -> float:
+        """Return the relaxed downward-speed floor used while arming kick."""
+        return self.config.min_velocity * self.config.candidate_ratio * 0.65
+
+    def _kick_confirmation_velocity_threshold(self) -> float:
+        """Return the downward-speed floor used while confirming kick."""
+        return self.config.min_velocity * 0.7
+
+    def _kick_axis_threshold(self) -> float:
+        """Return the relaxed downward-dominance floor used for kick detection."""
+        return max(0.55, self.config.axis_dominance_ratio * 0.6)
+
+    def _kick_depth_threshold(self) -> float:
+        """Return the relaxed depth-drift ceiling used for kick detection."""
+        return max(0.24, self.config.strike_max_depth_drift * 1.35)
+
     def _meets_kick_candidate(self, metrics: MotionMetrics) -> bool:
         """Return whether current motion is a viable downward-strike kick candidate."""
         return (
             metrics.delta_y
             >= self.config.strike_down_delta_y * self.config.candidate_ratio - COMPARISON_EPSILON
             and abs(metrics.delta_z)
-            <= self.config.strike_max_depth_drift + COMPARISON_EPSILON
+            <= self._kick_depth_threshold() + COMPARISON_EPSILON
             and metrics.downward_velocity
-            >= self.config.min_velocity * self.config.candidate_ratio - COMPARISON_EPSILON
-            and metrics.net_velocity
-            >= self.config.min_velocity * self.config.candidate_ratio - COMPARISON_EPSILON
+            >= self._kick_candidate_velocity_threshold() - COMPARISON_EPSILON
             and metrics.strike_axis_ratio
-            >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
+            >= self._kick_axis_threshold() - COMPARISON_EPSILON
         )
 
     def _is_kick_confirmed(self, metrics: MotionMetrics) -> bool:
@@ -810,11 +824,11 @@ class GestureDetector:
                 self.config.strike_down_delta_y * self.config.strike_confirmation_ratio
             )
             - COMPARISON_EPSILON
-            and abs(metrics.delta_z) <= self.config.strike_max_depth_drift + COMPARISON_EPSILON
-            and metrics.downward_velocity >= self.config.min_velocity - COMPARISON_EPSILON
-            and metrics.net_velocity >= self.config.min_velocity - COMPARISON_EPSILON
+            and abs(metrics.delta_z) <= self._kick_depth_threshold() + COMPARISON_EPSILON
+            and metrics.downward_velocity
+            >= self._kick_confirmation_velocity_threshold() - COMPARISON_EPSILON
             and metrics.strike_axis_ratio
-            >= self.config.axis_dominance_ratio - COMPARISON_EPSILON
+            >= self._kick_axis_threshold() - COMPARISON_EPSILON
         )
 
     def _snare_candidate_distance_threshold(self) -> float:
@@ -862,7 +876,6 @@ class GestureDetector:
             <= self.config.snare_collision_max_depth_gap + COMPARISON_EPSILON
             and metrics.closing_velocity
             >= self._snare_confirmation_velocity_threshold() - COMPARISON_EPSILON
-            and metrics.net_velocity >= self.config.min_velocity - COMPARISON_EPSILON
         )
 
     def _emit_candidate(

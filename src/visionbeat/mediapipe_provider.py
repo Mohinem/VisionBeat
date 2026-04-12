@@ -14,7 +14,11 @@ from urllib.request import urlretrieve
 
 from visionbeat.config import TrackerConfig
 from visionbeat.models import FrameTimestamp, LandmarkPoint, TrackerOutput
-from visionbeat.pose_provider import PoseBackendUnavailableError, PoseProvider
+from visionbeat.pose_provider import (
+    PoseBackendUnavailableError,
+    PoseProvider,
+    resize_frame_for_tracking,
+)
 
 logger = logging.getLogger(__name__)
 Frame = Any
@@ -196,7 +200,12 @@ class MediaPipePoseProvider(PoseProvider):
 
             self._cv2 = cv2
 
-        rgb_frame = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
+        tracking_frame = resize_frame_for_tracking(
+            frame,
+            cv2_module=self._cv2,
+            max_input_width=self.config.max_input_width,
+        )
+        rgb_frame = self._cv2.cvtColor(tracking_frame, self._cv2.COLOR_BGR2RGB)
         result = self._pose.process(rgb_frame)
         frame_timestamp = (
             timestamp

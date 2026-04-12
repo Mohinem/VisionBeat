@@ -196,7 +196,8 @@ class TrackerConfig:
     """Pose tracking backend configuration."""
 
     backend: str = "mediapipe"
-    model_complexity: int = 1
+    model_complexity: int = 0
+    max_input_width: int = 640
     min_detection_confidence: float = 0.55
     min_tracking_confidence: float = 0.55
     enable_segmentation: bool = False
@@ -209,6 +210,7 @@ class TrackerConfig:
             {
                 "backend",
                 "model_complexity",
+                "max_input_width",
                 "min_detection_confidence",
                 "min_tracking_confidence",
                 "enable_segmentation",
@@ -221,8 +223,9 @@ class TrackerConfig:
         return cls(
             backend=backend,
             model_complexity=reader.integer(
-                "model_complexity", default=1, allowed={0, 1, 2}
+                "model_complexity", default=0, allowed={0, 1, 2}
             ),
+            max_input_width=reader.integer("max_input_width", default=640, minimum=0),
             min_detection_confidence=reader.number(
                 "min_detection_confidence", default=0.55, minimum=0.0, maximum=1.0
             ),
@@ -242,6 +245,7 @@ class TrackerConfig:
         return {
             "backend": self.backend,
             "model_complexity": self.model_complexity,
+            "max_input_width": self.max_input_width,
             "min_detection_confidence": self.min_detection_confidence,
             "min_tracking_confidence": self.min_tracking_confidence,
             "enable_segmentation": self.enable_segmentation,
@@ -254,15 +258,15 @@ class GestureThresholdsConfig:
 
     punch_forward_delta_z: float = 0.006
     punch_max_vertical_drift: float = 0.75
-    strike_down_delta_y: float = 0.15
-    strike_confirmation_ratio: float = 0.65
-    strike_max_depth_drift: float = 0.18
-    snare_collision_distance: float = 0.15
-    snare_confirmation_velocity_ratio: float = 0.9
-    snare_collision_max_depth_gap: float = 0.18
-    min_velocity: float = 0.39
+    strike_down_delta_y: float = 0.06
+    strike_confirmation_ratio: float = 0.4
+    strike_max_depth_drift: float = 0.24
+    snare_collision_distance: float = 0.26
+    snare_confirmation_velocity_ratio: float = 0.8
+    snare_collision_max_depth_gap: float = 0.24
+    min_velocity: float = 0.37
     candidate_ratio: float = 0.6
-    axis_dominance_ratio: float = 1.2
+    axis_dominance_ratio: float = 1.0
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> GestureThresholdsConfig:
@@ -291,42 +295,42 @@ class GestureThresholdsConfig:
                 "punch_max_vertical_drift", default=0.75, minimum=0.0, inclusive_min=False
             ),
             strike_down_delta_y=reader.number(
-                "strike_down_delta_y", default=0.15, minimum=0.0, inclusive_min=False
+                "strike_down_delta_y", default=0.06, minimum=0.0, inclusive_min=False
             ),
             strike_confirmation_ratio=reader.number(
                 "strike_confirmation_ratio",
-                default=0.65,
+                default=0.4,
                 minimum=0.0,
                 maximum=1.0,
                 inclusive_min=False,
             ),
             strike_max_depth_drift=reader.number(
-                "strike_max_depth_drift", default=0.18, minimum=0.0, inclusive_min=False
+                "strike_max_depth_drift", default=0.24, minimum=0.0, inclusive_min=False
             ),
             snare_collision_distance=reader.number(
-                "snare_collision_distance", default=0.13, minimum=0.0, inclusive_min=False
+                "snare_collision_distance", default=0.26, minimum=0.0, inclusive_min=False
             ),
             snare_confirmation_velocity_ratio=reader.number(
                 "snare_confirmation_velocity_ratio",
-                default=0.9,
+                default=0.8,
                 minimum=0.0,
                 maximum=1.0,
                 inclusive_min=False,
             ),
             snare_collision_max_depth_gap=reader.number(
                 "snare_collision_max_depth_gap",
-                default=0.18,
+                default=0.24,
                 minimum=0.0,
                 inclusive_min=False,
             ),
             min_velocity=reader.number(
-                "min_velocity", default=0.39, minimum=0.0, inclusive_min=False
+                "min_velocity", default=0.37, minimum=0.0, inclusive_min=False
             ),
             candidate_ratio=reader.number(
                 "candidate_ratio", default=0.6, minimum=0.0, maximum=1.0, inclusive_min=False
             ),
             axis_dominance_ratio=reader.number(
-                "axis_dominance_ratio", default=1.2, minimum=1.0
+                "axis_dominance_ratio", default=1.0, minimum=1.0
             ),
         )
 
@@ -352,8 +356,8 @@ class GestureCooldownsConfig:
     """Timing windows that control gesture buffering and cooldown behavior."""
 
     trigger_seconds: float = 0.2
-    analysis_window_seconds: float = 0.24
-    confirmation_window_seconds: float = 0.18
+    analysis_window_seconds: float = 0.18
+    confirmation_window_seconds: float = 0.12
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> GestureCooldownsConfig:
@@ -367,10 +371,10 @@ class GestureCooldownsConfig:
                 "trigger_seconds", default=0.2, minimum=0.0, inclusive_min=False
             ),
             analysis_window_seconds=reader.number(
-                "analysis_window_seconds", default=0.24, minimum=0.0, inclusive_min=False
+                "analysis_window_seconds", default=0.18, minimum=0.0, inclusive_min=False
             ),
             confirmation_window_seconds=reader.number(
-                "confirmation_window_seconds", default=0.18, minimum=0.0, inclusive_min=False
+                "confirmation_window_seconds", default=0.12, minimum=0.0, inclusive_min=False
             ),
         )
 
@@ -391,7 +395,7 @@ class GestureConfig:
     cooldowns: GestureCooldownsConfig = field(default_factory=GestureCooldownsConfig)
     history_size: int = 6
     active_hand: str = "right"
-    velocity_smoothing_alpha: float = 0.55
+    velocity_smoothing_alpha: float = 0.8
     rearm_threshold_ratio: float = 0.45
 
     @classmethod
@@ -423,7 +427,7 @@ class GestureConfig:
             active_hand=active_hand,
             velocity_smoothing_alpha=reader.number(
                 "velocity_smoothing_alpha",
-                default=0.55,
+                default=0.8,
                 minimum=0.0,
                 maximum=1.0,
                 inclusive_min=False,
@@ -655,7 +659,9 @@ class OverlayConfig:
 
     draw_landmarks: bool = True
     draw_velocity_vectors: bool = True
+    show_landmark_labels: bool = True
     show_debug_panel: bool = True
+    show_trigger_flash: bool = True
 
     @classmethod
     def from_mapping(
@@ -666,11 +672,21 @@ class OverlayConfig:
     ) -> OverlayConfig:
         """Build overlay configuration from a validated mapping."""
         reader = _ConfigReader(payload, path=path)
-        reader.reject_unknown_keys({"draw_landmarks", "draw_velocity_vectors", "show_debug_panel"})
+        reader.reject_unknown_keys(
+            {
+                "draw_landmarks",
+                "draw_velocity_vectors",
+                "show_landmark_labels",
+                "show_debug_panel",
+                "show_trigger_flash",
+            }
+        )
         return cls(
             draw_landmarks=reader.boolean("draw_landmarks", default=True),
             draw_velocity_vectors=reader.boolean("draw_velocity_vectors", default=True),
+            show_landmark_labels=reader.boolean("show_landmark_labels", default=True),
             show_debug_panel=reader.boolean("show_debug_panel", default=True),
+            show_trigger_flash=reader.boolean("show_trigger_flash", default=True),
         )
 
     @classmethod
@@ -683,7 +699,9 @@ class OverlayConfig:
         return {
             "draw_landmarks": self.draw_landmarks,
             "draw_velocity_vectors": self.draw_velocity_vectors,
+            "show_landmark_labels": self.show_landmark_labels,
             "show_debug_panel": self.show_debug_panel,
+            "show_trigger_flash": self.show_trigger_flash,
         }
 
 

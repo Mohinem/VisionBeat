@@ -111,7 +111,9 @@ class VisionBeatRuntime:
         """Run the application until the preview window or frame source requests shutdown."""
         logger.info("Starting VisionBeat runtime loop")
         self._overlays_enabled = (
-            self.config.overlay.draw_landmarks or self.config.overlay.show_debug_panel
+            self.config.overlay.draw_landmarks
+            or self.config.overlay.show_debug_panel
+            or self.config.overlay.show_trigger_flash
         )
         self._debug_enabled = self.config.overlay.show_debug_panel
         self.overlay.set_overlay_enabled(self._overlays_enabled)
@@ -194,6 +196,9 @@ class VisionBeatRuntime:
             )
             return
         if key_code == self.debug_toggle_key:
+            if not self.config.overlay.show_debug_panel:
+                logger.info("Debug panel toggle ignored because debug panel is disabled")
+                return
             self._debug_enabled = not self._debug_enabled
             self.overlay.set_debug_enabled(self._debug_enabled)
             logger.info(

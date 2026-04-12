@@ -21,6 +21,12 @@ Or override the camera index from the CLI:
 visionbeat --config configs/default.yaml --camera-index 1
 ```
 
+For dataset capture, keep only the tracked skeleton HUD:
+
+```bash
+visionbeat --config configs/default.yaml --skeleton-only-hud
+```
+
 ## Validation behavior
 
 Configuration is strongly validated before the runtime starts. VisionBeat fails fast for:
@@ -46,7 +52,8 @@ camera:
   window_name: VisionBeat
 
 tracker:
-  model_complexity: 1
+  model_complexity: 0
+  max_input_width: 640
   min_detection_confidence: 0.55
   min_tracking_confidence: 0.55
   enable_segmentation: false
@@ -55,22 +62,22 @@ gestures:
   thresholds:
     punch_forward_delta_z: 0.006
     punch_max_vertical_drift: 0.75
-    strike_down_delta_y: 0.15
+    strike_down_delta_y: 0.12
     strike_confirmation_ratio: 0.65
     strike_max_depth_drift: 0.18
-    snare_collision_distance: 0.13
-    snare_confirmation_velocity_ratio: 0.9
-    snare_collision_max_depth_gap: 0.18
-    min_velocity: 0.39
+    snare_collision_distance: 0.26
+    snare_confirmation_velocity_ratio: 0.8
+    snare_collision_max_depth_gap: 0.24
+    min_velocity: 0.37
     candidate_ratio: 0.6
     axis_dominance_ratio: 1.2
   cooldowns:
     trigger_seconds: 0.2
-    analysis_window_seconds: 0.24
-    confirmation_window_seconds: 0.18
+    analysis_window_seconds: 0.18
+    confirmation_window_seconds: 0.12
   history_size: 6
   active_hand: right
-  velocity_smoothing_alpha: 0.55
+  velocity_smoothing_alpha: 0.8
   rearm_threshold_ratio: 0.45
 
 audio:
@@ -95,7 +102,9 @@ debug:
   overlays:
     draw_landmarks: true
     draw_velocity_vectors: true
+    show_landmark_labels: true
     show_debug_panel: true
+    show_trigger_flash: true
 
 logging:
   level: INFO
@@ -124,7 +133,8 @@ Controls webcam acquisition and preview-window labeling.
 
 Controls MediaPipe pose-tracking behavior.
 
-- `model_complexity` (`0 | 1 | 2`, default `1`): pose model complexity.
+- `model_complexity` (`0 | 1 | 2`, default `0`): pose model complexity.
+- `max_input_width` (`int`, default `640`): maximum frame width used for pose inference; wider frames are downscaled before tracking to reduce latency.
 - `min_detection_confidence` (`float`, default `0.55`): minimum confidence for person detection.
 - `min_tracking_confidence` (`float`, default `0.55`): minimum confidence required for retained landmarks.
 - `enable_segmentation` (`bool`, default `false`): whether to request segmentation from MediaPipe.
@@ -137,13 +147,13 @@ Controls wrist-history sizing, active-hand selection, timing windows, and gestur
 
 - `punch_forward_delta_z` (`float`, default `0.006`): legacy compatibility field retained for older configs and sensitivity presets.
 - `punch_max_vertical_drift` (`float`, default `0.75`): legacy compatibility field retained for older configs and sensitivity presets.
-- `strike_down_delta_y` (`float`, default `0.15`): minimum downward travel for kick detection.
+- `strike_down_delta_y` (`float`, default `0.12`): minimum downward travel for kick detection.
 - `strike_confirmation_ratio` (`float`, default `0.65`): multiplier applied to `strike_down_delta_y` during final kick confirmation.
 - `strike_max_depth_drift` (`float`, default `0.18`): maximum allowed depth drift during a downward-strike kick.
-- `snare_collision_distance` (`float`, default `0.13`): maximum image-plane wrist distance allowed for snare confirmation.
-- `snare_confirmation_velocity_ratio` (`float`, default `0.9`): multiplier applied to `min_velocity` during final snare closing-speed confirmation.
-- `snare_collision_max_depth_gap` (`float`, default `0.18`): maximum wrist depth gap allowed for snare confirmation.
-- `min_velocity` (`float`, default `0.39`): shared baseline motion speed used by both gestures.
+- `snare_collision_distance` (`float`, default `0.26`): maximum image-plane wrist distance allowed for snare confirmation.
+- `snare_confirmation_velocity_ratio` (`float`, default `0.8`): multiplier applied to `min_velocity` during final snare closing-speed confirmation.
+- `snare_collision_max_depth_gap` (`float`, default `0.24`): maximum wrist depth gap allowed for snare confirmation.
+- `min_velocity` (`float`, default `0.37`): shared baseline motion speed used by both gestures.
 - `candidate_ratio` (`float`, default `0.6`): ratio used to derive lower onset thresholds from the base displacement thresholds.
 - `axis_dominance_ratio` (`float`, default `1.2`): baseline dominance factor for the downward-strike kick axis.
 
@@ -152,14 +162,14 @@ Controls wrist-history sizing, active-hand selection, timing windows, and gestur
 #### `gestures.cooldowns`
 
 - `trigger_seconds` (`float`, default `0.2`): debounce period after a confirmed hit.
-- `analysis_window_seconds` (`float`, default `0.24`): time span of wrist history considered for metrics.
-- `confirmation_window_seconds` (`float`, default `0.18`): maximum time between candidate onset and confirmation.
+- `analysis_window_seconds` (`float`, default `0.18`): time span of wrist history considered for metrics.
+- `confirmation_window_seconds` (`float`, default `0.12`): maximum time between candidate onset and confirmation.
 
 #### `gestures` root fields
 
 - `history_size` (`int`, default `6`): maximum wrist samples retained per hand.
 - `active_hand` (`left | right`, default `right`): the hand eligible to trigger events.
-- `velocity_smoothing_alpha` (`float`, default `0.55`): exponential smoothing factor applied before peak-velocity measurement.
+- `velocity_smoothing_alpha` (`float`, default `0.8`): exponential smoothing factor applied before peak-velocity measurement.
 - `rearm_threshold_ratio` (`float`, default `0.45`): fraction of the base gesture travel required before the same hand can retrigger after recovery.
 
 ### `audio`
@@ -190,7 +200,9 @@ Controls what the preview overlay renders.
 
 - `draw_landmarks` (`bool`, default `true`): draw the tracked upper-body skeleton.
 - `draw_velocity_vectors` (`bool`, default `true`): reserved overlay toggle for velocity diagnostics.
+- `show_landmark_labels` (`bool`, default `true`): show landmark-name text next to joints.
 - `show_debug_panel` (`bool`, default `true`): show text status/candidate/cooldown information.
+- `show_trigger_flash` (`bool`, default `true`): show the red trigger confirmation flash.
 
 ### `logging`
 
