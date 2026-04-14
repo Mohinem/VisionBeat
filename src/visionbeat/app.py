@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from visionbeat.audio import AudioEngine, create_audio_engine
 from visionbeat.camera import CameraFrame, CameraSource
 from visionbeat.config import AppConfig
+from visionbeat.features import (
+    CanonicalFeatureSchema,
+    CanonicalFeatureExtractor,
+    CanonicalFrameFeatures,
+    CanonicalSequenceWindow,
+    assert_feature_schemas_match,
+    build_sequence_window,
+    get_canonical_feature_schema,
+)
 from visionbeat.gestures import GestureDetector
 from visionbeat.models import (
     AudioTrigger,
@@ -16,6 +26,7 @@ from visionbeat.models import (
     FrameTimestamp,
     GestureEvent,
     RenderState,
+    TrackerOutput,
 )
 from visionbeat.observability import ObservabilityRecorder, build_observability_recorder
 from visionbeat.overlay import OverlayRenderer
@@ -102,10 +113,28 @@ class VisionBeatRuntime:
     session_recorder: SessionRecorder | None = None
     overlay_toggle_key: int = ord("o")
     debug_toggle_key: int = ord("d")
+    live_feature_history_size: int = 32
+    feature_extractor: CanonicalFeatureExtractor = field(default_factory=CanonicalFeatureExtractor)
+    live_feature_schema: CanonicalFeatureSchema = field(default_factory=get_canonical_feature_schema)
     _last_confirmed_gesture: GestureEvent | None = field(default=None, init=False)
     _last_frame_time: float | None = field(default=None, init=False)
     _overlays_enabled: bool = field(default=True, init=False)
     _debug_enabled: bool = field(default=True, init=False)
+    _feature_history: deque[CanonicalFrameFeatures] = field(init=False)
+    _latest_frame_features: CanonicalFrameFeatures | None = field(default=None, init=False)
+    _latest_feature_vector: tuple[float, ...] | None = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        """Initialize live canonical-feature state for future model inference."""
+        if self.live_feature_history_size <= 0:
+            raise ValueError("live_feature_history_size must be greater than zero.")
+        assert_feature_schemas_match(
+            self.live_feature_schema,
+            self.feature_extractor.schema,
+            context_expected="live runtime schema",
+            context_actual="feature extractor schema",
+        )
+        self._feature_history = deque(maxlen=self.live_feature_history_size)
 
     def run(self) -> None:
         """Run the application until the preview window or frame source requests shutdown."""
@@ -135,6 +164,10 @@ class VisionBeatRuntime:
             self.session_recorder.record_camera_frame(camera_frame)
         timestamp = FrameTimestamp(seconds=camera_frame.captured_at)
         pose = self.tracker.process(camera_frame.image, timestamp)
+        # The canonical live feature vector becomes available here. A future CNN
+        # inference path should consume `frame_features.vector` instead of
+        # reimplementing any pose-to-feature formulas locally.
+        frame_features = self._extract_live_features(pose)
         if self.session_recorder is not None:
             self.session_recorder.record_tracker_output(camera_frame, pose)
         events = list(self.detector.update(pose))
@@ -147,10 +180,11 @@ class VisionBeatRuntime:
         )
 
         logger.debug(
-            "Frame index=%s tracking_status=%s detected=%s candidates=%s events=%s",
+            "Frame index=%s tracking_status=%s detected=%s feature_dims=%s candidates=%s events=%s",
             camera_frame.frame_index,
             pose.status,
             pose.person_detected,
+            len(frame_features.vector),
             len(self.detector.candidates),
             len(events),
         )
@@ -206,11 +240,43 @@ class VisionBeatRuntime:
                 "on" if self._debug_enabled else "off",
             )
 
+    @property
+    def latest_frame_features(self) -> CanonicalFrameFeatures | None:
+        """Return the most recent canonical per-frame features from the live path."""
+        return self._latest_frame_features
+
+    @property
+    def latest_feature_vector(self) -> tuple[float, ...] | None:
+        """Return the latest ordered CNN-ready feature vector from the live path."""
+        return self._latest_feature_vector
+
+    def build_live_feature_window(
+        self,
+        *,
+        window_size: int | None = None,
+    ) -> CanonicalSequenceWindow:
+        """Return a sliding canonical feature window for future live model inference."""
+        return build_sequence_window(
+            tuple(self._feature_history),
+            window_size=window_size,
+        )
+
     def _select_candidate(self) -> DetectionCandidate | None:
         """Return the highest-confidence active gesture candidate, if any."""
         if not self.detector.candidates:
             return None
         return max(self.detector.candidates, key=lambda candidate: candidate.confidence)
+
+    def _extract_live_features(self, pose: TrackerOutput) -> CanonicalFrameFeatures:
+        """Extract and retain live canonical features without affecting gesture logic."""
+        frame_features = self.feature_extractor.update(pose)
+        self._latest_frame_features = frame_features
+        self._latest_feature_vector = frame_features.vector
+        # Keep a bounded sliding history of canonical frames so future live CNN
+        # prediction can request `build_live_feature_window(window_size=...)`
+        # without recomputing any per-frame formulas.
+        self._feature_history.append(frame_features)
+        return frame_features
 
     def _detector_status(self, timestamp: FrameTimestamp) -> str | None:
         """Return a short detector-phase summary when the implementation exposes one."""

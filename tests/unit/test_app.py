@@ -8,6 +8,7 @@ import pytest
 from visionbeat.app import VisionBeatApp, VisionBeatRuntime
 from visionbeat.camera import CameraFrame
 from visionbeat.config import AppConfig
+from visionbeat.features import CANONICAL_FEATURE_NAMES, get_canonical_feature_schema
 from visionbeat.models import (
     AudioTrigger,
     DetectionCandidate,
@@ -350,6 +351,68 @@ def test_runtime_tracks_on_raw_frame_and_renders_mirrored_preview() -> None:
     assert runtime.tracker.process_calls[0][0] is raw_frame
     assert runtime.overlay.calls[0][0] is mirrored_frame
     assert runtime.overlay.calls[0][1].pose.get("right_wrist").x == pytest.approx(0.8)
+
+
+def test_runtime_extracts_canonical_live_features_and_maintains_window() -> None:
+    frames = [
+        CameraFrame(image=FakeFrame("frame-0"), captured_at=1.0, frame_index=0),
+        CameraFrame(image=FakeFrame("frame-1"), captured_at=1.5, frame_index=1),
+    ]
+    poses = [
+        TrackerOutput(
+            timestamp=FrameTimestamp(seconds=1.0),
+            landmarks={
+                "left_shoulder": LandmarkPoint(x=0.25, y=0.50, z=-0.1, visibility=0.9),
+                "right_shoulder": LandmarkPoint(x=0.75, y=0.50, z=-0.1, visibility=0.9),
+                "left_wrist": LandmarkPoint(x=0.25, y=0.50, z=-0.2, visibility=0.95),
+                "right_wrist": LandmarkPoint(x=0.75, y=0.50, z=-0.2, visibility=0.95),
+            },
+            person_detected=True,
+            status="tracking",
+        ),
+        TrackerOutput(
+            timestamp=FrameTimestamp(seconds=1.5),
+            landmarks={
+                "left_shoulder": LandmarkPoint(x=0.25, y=0.50, z=-0.1, visibility=0.9),
+                "right_shoulder": LandmarkPoint(x=0.75, y=0.50, z=-0.1, visibility=0.9),
+                "left_wrist": LandmarkPoint(x=0.50, y=0.75, z=-0.2, visibility=0.95),
+                "right_wrist": LandmarkPoint(x=0.75, y=0.75, z=-0.2, visibility=0.95),
+            },
+            person_detected=True,
+            status="tracking",
+        ),
+    ]
+    runtime = VisionBeatRuntime(
+        config=AppConfig(),
+        camera=FakeCamera(frames),
+        tracker=FakeTracker(poses),
+        detector=FakeDetector(
+            events_by_frame=[[], []],
+            candidates_by_frame=[(), ()],
+            cooldowns=[0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False]),
+    )
+
+    runtime.process_next_frame()
+    runtime.process_next_frame()
+
+    assert runtime.latest_frame_features is not None
+    assert runtime.latest_feature_vector is not None
+    assert runtime.live_feature_schema == get_canonical_feature_schema()
+    assert len(runtime.latest_feature_vector) == len(CANONICAL_FEATURE_NAMES)
+    assert runtime.latest_frame_features.temporal_features["dt_seconds"] == pytest.approx(0.5)
+    assert runtime.latest_frame_features.temporal_features["left_wrist_rel_vx"] == pytest.approx(1.0)
+    assert runtime.latest_frame_features.temporal_features["left_wrist_rel_vy"] == pytest.approx(1.0)
+
+    window = runtime.build_live_feature_window(window_size=4)
+    assert window.schema_version == runtime.live_feature_schema.version
+    assert window.feature_count == runtime.live_feature_schema.feature_count
+    assert len(window.frames) == 2
+    assert len(window.matrix) == 4
+    assert window.matrix[-1] == runtime.latest_feature_vector
 
 
 def test_runtime_run_opens_and_closes_resources_on_keypress() -> None:

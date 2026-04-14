@@ -12,6 +12,12 @@ from typing import Any, Literal, TextIO
 import numpy as np
 
 from visionbeat.camera import CameraFrame
+from visionbeat.features import (
+    CanonicalFeatureSchema,
+    CanonicalFeatureExtractor,
+    assert_feature_schemas_match,
+    get_canonical_feature_schema,
+)
 from visionbeat.models import GestureEvent, TrackerOutput
 
 SessionRecordingMode = Literal["tracker_outputs", "raw_frames", "both"]
@@ -29,11 +35,15 @@ class SessionRecorder:
     _frames_dir: Path | None = field(init=False, default=None)
     _camera_stream: TextIO | None = field(init=False, default=None)
     _tracker_stream: TextIO | None = field(init=False, default=None)
+    _feature_stream: TextIO | None = field(init=False, default=None)
     _trigger_stream: TextIO = field(init=False)
+    _feature_extractor: CanonicalFeatureExtractor = field(init=False)
+    _feature_schema: CanonicalFeatureSchema = field(init=False)
     _started_at: str = field(init=False)
     _stopped_at: str | None = field(init=False, default=None)
     _camera_frame_count: int = field(init=False, default=0)
     _tracker_output_count: int = field(init=False, default=0)
+    _feature_frame_count: int = field(init=False, default=0)
     _trigger_count: int = field(init=False, default=0)
     _closed: bool = field(init=False, default=False)
 
@@ -43,6 +53,14 @@ class SessionRecorder:
         self.root_path.mkdir(parents=True, exist_ok=True)
         self.session_dir = self._create_session_dir()
         self._manifest_path = self.session_dir / "manifest.json"
+        self._feature_extractor = CanonicalFeatureExtractor()
+        self._feature_schema = get_canonical_feature_schema()
+        assert_feature_schemas_match(
+            self._feature_schema,
+            self._feature_extractor.schema,
+            context_expected="session recorder schema",
+            context_actual="feature extractor schema",
+        )
         self._started_at = datetime.now(tz=UTC).isoformat(timespec="milliseconds")
         if self.captures_raw_frames:
             self._frames_dir = self.session_dir / "frames"
@@ -53,6 +71,10 @@ class SessionRecorder:
             )
         if self.captures_tracker_outputs:
             self._tracker_stream = (self.session_dir / "tracker_outputs.jsonl").open(
+                "a",
+                encoding="utf-8",
+            )
+            self._feature_stream = (self.session_dir / "feature_frames.jsonl").open(
                 "a",
                 encoding="utf-8",
             )
@@ -102,6 +124,8 @@ class SessionRecorder:
         if not self.captures_tracker_outputs:
             return
         assert self._tracker_stream is not None
+        assert self._feature_stream is not None
+        feature_frame = self._feature_extractor.update(tracker_output)
         self._write_jsonl(
             self._tracker_stream,
             {
@@ -111,6 +135,15 @@ class SessionRecorder:
             },
         )
         self._tracker_output_count += 1
+        self._write_jsonl(
+            self._feature_stream,
+            {
+                "frame_index": camera_frame.frame_index,
+                "captured_at": camera_frame.captured_at,
+                "feature_frame": feature_frame.to_dict(),
+            },
+        )
+        self._feature_frame_count += 1
 
     def record_trigger(self, event: GestureEvent) -> None:
         """Persist one confirmed gesture event."""
@@ -127,6 +160,8 @@ class SessionRecorder:
             self._camera_stream.close()
         if self._tracker_stream is not None:
             self._tracker_stream.close()
+        if self._feature_stream is not None:
+            self._feature_stream.close()
         self._trigger_stream.close()
         self._closed = True
 
@@ -149,6 +184,7 @@ class SessionRecorder:
             artifacts["frames_directory"] = "frames"
         if self.captures_tracker_outputs:
             artifacts["tracker_outputs"] = "tracker_outputs.jsonl"
+            artifacts["feature_frames"] = "feature_frames.jsonl"
         payload = {
             "schema": "visionbeat.session.v1",
             "session_id": self.session_dir.name,
@@ -157,9 +193,13 @@ class SessionRecorder:
             "recording_mode": self.mode,
             "session_directory": self.session_dir.as_posix(),
             "artifacts": artifacts,
+            "feature_schema": (
+                self._feature_schema.to_dict() if self.captures_tracker_outputs else None
+            ),
             "counts": {
                 "camera_frames": self._camera_frame_count,
                 "tracker_outputs": self._tracker_output_count,
+                "feature_frames": self._feature_frame_count,
                 "triggers": self._trigger_count,
             },
             "config": self.config_payload,

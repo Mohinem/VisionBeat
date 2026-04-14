@@ -6,6 +6,11 @@ from pathlib import Path
 import numpy as np
 
 from visionbeat.camera import CameraFrame
+from visionbeat.features import (
+    CANONICAL_FEATURE_NAMES,
+    CANONICAL_FEATURE_SCHEMA,
+    FEATURE_COUNT,
+)
 from visionbeat.models import (
     FrameTimestamp,
     GestureEvent,
@@ -67,6 +72,10 @@ def test_session_recorder_writes_tracker_outputs_and_triggers(tmp_path: Path) ->
         json.loads(line)
         for line in (session_dir / "tracker_outputs.jsonl").read_text(encoding="utf-8").splitlines()
     ]
+    feature_rows = [
+        json.loads(line)
+        for line in (session_dir / "feature_frames.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     trigger_rows = [
         json.loads(line)
         for line in (session_dir / "triggers.jsonl").read_text(encoding="utf-8").splitlines()
@@ -74,8 +83,14 @@ def test_session_recorder_writes_tracker_outputs_and_triggers(tmp_path: Path) ->
 
     assert manifest["recording_mode"] == "tracker_outputs"
     assert manifest["config"]["camera"]["fps"] == 30
+    assert manifest["artifacts"]["feature_frames"] == "feature_frames.jsonl"
+    assert manifest["feature_schema"]["schema"] == CANONICAL_FEATURE_SCHEMA
+    assert manifest["feature_schema"]["schema_version"] == CANONICAL_FEATURE_SCHEMA
+    assert manifest["feature_schema"]["feature_count"] == FEATURE_COUNT
+    assert manifest["feature_schema"]["feature_names"] == list(CANONICAL_FEATURE_NAMES)
     assert manifest["counts"]["camera_frames"] == 0
     assert manifest["counts"]["tracker_outputs"] == 1
+    assert manifest["counts"]["feature_frames"] == 1
     assert manifest["counts"]["triggers"] == 1
     assert tracker_rows == [
         {
@@ -84,6 +99,16 @@ def test_session_recorder_writes_tracker_outputs_and_triggers(tmp_path: Path) ->
             "tracker_output": pose.to_dict(),
         }
     ]
+    assert feature_rows[0]["captured_at"] == 1.25
+    assert feature_rows[0]["frame_index"] == 3
+    assert feature_rows[0]["feature_frame"]["person_detected"] is True
+    assert feature_rows[0]["feature_frame"]["schema"] == CANONICAL_FEATURE_SCHEMA
+    assert feature_rows[0]["feature_frame"]["schema_version"] == CANONICAL_FEATURE_SCHEMA
+    assert feature_rows[0]["feature_frame"]["feature_count"] == FEATURE_COUNT
+    assert feature_rows[0]["feature_frame"]["feature_names"] == list(CANONICAL_FEATURE_NAMES)
+    assert feature_rows[0]["feature_frame"]["status"] == "tracking"
+    assert feature_rows[0]["feature_frame"]["timestamp"] == {"seconds": 1.25}
+    assert len(feature_rows[0]["feature_frame"]["vector"]) == len(CANONICAL_FEATURE_NAMES)
     assert trigger_rows == [event.to_dict()]
 
 
@@ -115,9 +140,11 @@ def test_session_recorder_writes_lossless_raw_frames_for_replay(tmp_path: Path) 
 
     assert manifest["recording_mode"] == "both"
     assert manifest["artifacts"]["frames_directory"] == "frames"
+    assert manifest["artifacts"]["feature_frames"] == "feature_frames.jsonl"
     assert frame_row["frame_index"] == 12
     assert frame_row["captured_at"] == 2.5
     assert frame_row["mirrored_for_display"] is True
     assert frame_row["shape"] == [2, 3, 3]
     assert frame_row["dtype"] == "uint8"
+    assert manifest["counts"]["feature_frames"] == 1
     assert np.array_equal(persisted_frame, raw_frame)

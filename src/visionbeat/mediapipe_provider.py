@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
+from types import ModuleType
 from types import SimpleNamespace
 from typing import Any, Final
 from urllib.error import URLError
@@ -167,9 +169,10 @@ class MediaPipePoseProvider(PoseProvider):
             self.config.min_tracking_confidence,
         )
         import_failures: list[str] = []
-        pose_factory = self._try_load_pose_factory(import_failures)
-        if pose_factory is None:
-            pose_factory = self._load_tasks_pose_factory(import_failures)
+        with _temporary_sounddevice_stub():
+            pose_factory = self._try_load_pose_factory(import_failures)
+            if pose_factory is None:
+                pose_factory = self._load_tasks_pose_factory(import_failures)
         if pose_factory is None:
             failure_lines = (
                 "\n".join(f"- {failure}" for failure in import_failures)
@@ -257,6 +260,39 @@ class MediaPipePoseProvider(PoseProvider):
         """Close MediaPipe resources."""
         logger.info("Closing pose backend=%s", self.config.backend)
         self._pose.close()
+
+
+@contextmanager
+def _temporary_sounddevice_stub():
+    """Prevent MediaPipe's unused audio Tasks import from hanging on sounddevice.
+
+    VisionBeat only needs MediaPipe vision APIs for pose extraction, but recent
+    MediaPipe wheels import the audio Tasks package at module import time. In
+    environments where `sounddevice` hangs during import, that blocks the pose
+    backend before any tracking code runs. A temporary stub keeps the audio
+    package importable while leaving the rest of the process unchanged once the
+    MediaPipe modules are loaded.
+    """
+
+    if "sounddevice" in sys.modules:
+        yield
+        return
+
+    stub = ModuleType("sounddevice")
+
+    class _UnavailableInputStream:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise ImportError(
+                "sounddevice is unavailable in this environment; "
+                "MediaPipe audio Tasks cannot be used."
+            )
+
+    stub.InputStream = _UnavailableInputStream
+    sys.modules["sounddevice"] = stub
+    try:
+        yield
+    finally:
+        sys.modules.pop("sounddevice", None)
 
 
 class _TasksPoseAdapter:
