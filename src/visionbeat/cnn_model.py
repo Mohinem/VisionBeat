@@ -45,11 +45,17 @@ class VisionBeatCnnSpec:
         if self.horizon_frames < 0:
             raise ValueError("horizon_frames must be greater than or equal to zero.")
         if (
-            self.target_name == "completion_within_next_k_frames"
+            self.target_name
+            in {
+                "completion_within_next_k_frames",
+                "completion_within_last_k_frames",
+                "arm_within_next_k_frames",
+                "arm_within_last_k_frames",
+            }
             and self.horizon_frames <= 0
         ):
             raise ValueError(
-                "horizon_frames must be greater than zero for completion_within_next_k_frames."
+                "horizon_frames must be greater than zero for tolerant timing targets."
             )
         if (
             self.schema_version == FEATURE_SCHEMA_VERSION
@@ -305,7 +311,13 @@ def validate_runtime_compatibility(
             f"Checkpoint target_name {spec.target_name!r} does not match runtime target_name {target_name!r}."
         )
     if (
-        spec.target_name == "completion_within_next_k_frames"
+        spec.target_name
+        in {
+            "completion_within_next_k_frames",
+            "completion_within_last_k_frames",
+            "arm_within_next_k_frames",
+            "arm_within_last_k_frames",
+        }
         and spec.horizon_frames != horizon_frames
     ):
         raise ValueError(

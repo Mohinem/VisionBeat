@@ -72,3 +72,16 @@ event_log_path = ""
 event_log_format = "jsonl"
 session_recording_path = ""
 session_recording_mode = "tracker_outputs"
+
+[predictive]
+# disabled = heuristics only
+# shadow = heuristics drive audio, predictive CNN+decoder logs passively
+# primary = predictive CNN+decoder drives audio
+# hybrid = predictive arms the gesture, heuristic completion fires audio
+mode = "disabled"
+timing_checkpoint_path = ""
+gesture_checkpoint_path = ""
+threshold = 0.6
+trigger_cooldown_frames = 6
+trigger_max_gap_frames = 1
+device = "auto"

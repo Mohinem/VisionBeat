@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import pytest
 
 from visionbeat.app import VisionBeatApp, VisionBeatRuntime
 from visionbeat.camera import CameraFrame
-from visionbeat.config import AppConfig
+from visionbeat.config import AppConfig, PredictiveConfig, RuntimeConfig
 from visionbeat.features import CANONICAL_FEATURE_NAMES, get_canonical_feature_schema
 from visionbeat.models import (
     AudioTrigger,
@@ -19,6 +20,7 @@ from visionbeat.models import (
     RenderState,
     TrackerOutput,
 )
+from visionbeat.predictive_shadow import PredictiveStatus, ShadowPredictionEvent
 
 
 @dataclass
@@ -157,6 +159,8 @@ class FakeRecorder:
         self.runtime_started: list[str] = []
         self.runtime_stopped: list[str] = []
         self.tracking_failures: list[tuple[float, str]] = []
+        self.predictive_shadow_triggers: list[dict[str, object]] = []
+        self.predictive_live_triggers: list[dict[str, object]] = []
         self.shutdown_calls = 0
         self.close_calls = 0
         self.app_startups: list[dict[str, object]] = []
@@ -176,8 +180,112 @@ class FakeRecorder:
     def log_tracking_failure(self, *, timestamp: float, status: str) -> None:
         self.tracking_failures.append((timestamp, status))
 
+    def log_predictive_shadow_trigger(
+        self,
+        *,
+        timestamp: float,
+        frame_index: int,
+        timing_probability: float,
+        predicted_gesture: GestureType,
+        predicted_gesture_confidence: float,
+        heuristic_gesture_types: tuple[str, ...],
+        class_probabilities: dict[str, float],
+    ) -> None:
+        self.predictive_shadow_triggers.append(
+            {
+                "timestamp": timestamp,
+                "frame_index": frame_index,
+                "timing_probability": timing_probability,
+                "predicted_gesture": predicted_gesture,
+                "predicted_gesture_confidence": predicted_gesture_confidence,
+                "heuristic_gesture_types": heuristic_gesture_types,
+                "class_probabilities": class_probabilities,
+            }
+        )
+
+    def log_predictive_live_trigger(
+        self,
+        *,
+        timestamp: float,
+        frame_index: int,
+        timing_probability: float,
+        predicted_gesture: GestureType,
+        predicted_gesture_confidence: float,
+        hand: str,
+        class_probabilities: dict[str, float],
+    ) -> None:
+        self.predictive_live_triggers.append(
+            {
+                "timestamp": timestamp,
+                "frame_index": frame_index,
+                "timing_probability": timing_probability,
+                "predicted_gesture": predicted_gesture,
+                "predicted_gesture_confidence": predicted_gesture_confidence,
+                "hand": hand,
+                "class_probabilities": class_probabilities,
+            }
+        )
+
     def close(self) -> None:
         self.close_calls += 1
+
+
+class StreamingFakeCamera:
+    def __init__(self, *, interval_seconds: float = 1.0 / 30.0) -> None:
+        self.interval_seconds = interval_seconds
+        self.open_calls = 0
+        self.close_calls = 0
+        self.frame_index = 0
+        self.started_at = 1.0
+
+    def open(self) -> None:
+        self.open_calls += 1
+
+    def read_frame(self) -> CameraFrame:
+        time.sleep(self.interval_seconds)
+        frame_index = self.frame_index
+        self.frame_index += 1
+        captured_at = self.started_at + (frame_index * self.interval_seconds)
+        return CameraFrame(
+            image=FakeFrame(f"frame-{frame_index}"),
+            captured_at=captured_at,
+            frame_index=frame_index,
+        )
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class StreamingFakeTracker:
+    def __init__(self, *, delay_seconds: float = 0.05) -> None:
+        self.delay_seconds = delay_seconds
+        self.process_calls: list[tuple[object, FrameTimestamp]] = []
+        self.close_calls = 0
+
+    def process(self, frame: object, timestamp: FrameTimestamp) -> TrackerOutput:
+        self.process_calls.append((frame, timestamp))
+        time.sleep(self.delay_seconds)
+        return make_pose(timestamp.seconds)
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class StreamingFakeDetector:
+    def __init__(self) -> None:
+        self.update_calls: list[TrackerOutput] = []
+
+    @property
+    def candidates(self) -> tuple[DetectionCandidate, ...]:
+        return ()
+
+    def update(self, frame: TrackerOutput) -> list[GestureEvent]:
+        self.update_calls.append(frame)
+        return []
+
+    def cooldown_remaining(self, timestamp: FrameTimestamp) -> float:
+        assert timestamp.seconds >= 0.0
+        return 0.0
 
 
 class FakeSessionRecorder:
@@ -186,6 +294,7 @@ class FakeSessionRecorder:
         self.camera_frames: list[CameraFrame] = []
         self.tracker_outputs: list[tuple[CameraFrame, TrackerOutput]] = []
         self.triggers: list[GestureEvent] = []
+        self.predictive_shadow_triggers: list[dict[str, object]] = []
         self.close_calls = 0
 
     def record_camera_frame(self, camera_frame: CameraFrame) -> None:
@@ -200,6 +309,9 @@ class FakeSessionRecorder:
 
     def record_trigger(self, event: GestureEvent) -> None:
         self.triggers.append(event)
+
+    def record_predictive_shadow_trigger(self, payload: dict[str, object]) -> None:
+        self.predictive_shadow_triggers.append(payload)
 
     def close(self) -> None:
         self.close_calls += 1
@@ -404,8 +516,12 @@ def test_runtime_extracts_canonical_live_features_and_maintains_window() -> None
     assert runtime.live_feature_schema == get_canonical_feature_schema()
     assert len(runtime.latest_feature_vector) == len(CANONICAL_FEATURE_NAMES)
     assert runtime.latest_frame_features.temporal_features["dt_seconds"] == pytest.approx(0.5)
-    assert runtime.latest_frame_features.temporal_features["left_wrist_rel_vx"] == pytest.approx(1.0)
-    assert runtime.latest_frame_features.temporal_features["left_wrist_rel_vy"] == pytest.approx(1.0)
+    assert runtime.latest_frame_features.temporal_features["left_wrist_rel_vx"] == pytest.approx(
+        1.0
+    )
+    assert runtime.latest_frame_features.temporal_features["left_wrist_rel_vy"] == pytest.approx(
+        1.0
+    )
 
     window = runtime.build_live_feature_window(window_size=4)
     assert window.schema_version == runtime.live_feature_schema.version
@@ -580,6 +696,373 @@ def test_runtime_records_tracking_failures_for_non_tracking_status() -> None:
     runtime.process_next_frame()
 
     assert recorder.tracking_failures == [(3.0, "no_person_detected")]
+
+
+def test_runtime_async_pipeline_decouples_render_loop_from_inference() -> None:
+    config = replace(
+        AppConfig(),
+        runtime=RuntimeConfig(
+            async_pipeline=True,
+            target_render_fps=30,
+            idle_sleep_seconds=0.001,
+        ),
+    )
+    camera = StreamingFakeCamera(interval_seconds=1.0 / 30.0)
+    tracker = StreamingFakeTracker(delay_seconds=0.05)
+    overlay = FakeOverlay()
+    preview = FakePreview([False, False, False, False, False, True])
+    runtime = VisionBeatRuntime(
+        config=config,
+        camera=camera,
+        tracker=tracker,
+        detector=StreamingFakeDetector(),
+        audio=FakeAudio(),
+        transport=FakeTransport(),
+        overlay=overlay,
+        preview=preview,
+    )
+
+    runtime.run()
+
+    assert camera.open_calls == 1
+    assert camera.close_calls == 1
+    assert tracker.close_calls == 1
+    assert len(preview.show_calls) >= 3
+    states = [state for _, state in overlay.calls]
+    assert any(state.pose.status == "warming_up" for state in states)
+    tracked_states = [state for state in states if state.pose.status == "tracking"]
+    assert tracked_states
+    assert any(state.capture_fps is not None for state in tracked_states)
+    assert any(state.inference_fps is not None for state in tracked_states)
+    assert any(state.render_fps is not None for state in tracked_states)
+    assert any(state.pipeline_latency_ms is not None for state in tracked_states)
+
+
+class FakePredictiveShadowRunner:
+    def __init__(
+        self,
+        events: tuple[ShadowPredictionEvent, ...],
+        *,
+        status_summary: str = "p=0.23/0.30 top=kick 0.71",
+        latest_status: PredictiveStatus | None = None,
+        prediction_horizon_frames: int = 8,
+    ) -> None:
+        self.required_window_size = 2
+        self.prediction_horizon_frames = prediction_horizon_frames
+        self.events = events
+        self._status_summary = status_summary
+        self.latest_status = latest_status or PredictiveStatus(
+            available_window_frames=2,
+            required_window_size=2,
+            threshold=0.3,
+            timing_probability=0.23,
+            predicted_gesture=GestureType.KICK,
+            predicted_gesture_confidence=0.71,
+            class_probabilities={"kick": 0.71, "snare": 0.29},
+        )
+        self.update_calls: list[dict[str, object]] = []
+        self.flush_calls = 0
+
+    def update(
+        self,
+        *,
+        feature_window,
+        frame_index: int,
+        timestamp: FrameTimestamp,
+        heuristic_events: tuple[GestureEvent, ...],
+    ) -> tuple[ShadowPredictionEvent, ...]:
+        self.update_calls.append(
+            {
+                "frame_index": frame_index,
+                "timestamp": timestamp,
+                "heuristic_events": heuristic_events,
+                "window_rows": len(feature_window.matrix),
+                "frame_count": len(feature_window.frames),
+            }
+        )
+        return self.events
+
+    def flush(self) -> tuple[ShadowPredictionEvent, ...]:
+        self.flush_calls += 1
+        return ()
+
+    def status_summary(self) -> str:
+        return self._status_summary
+
+
+def test_runtime_logs_predictive_shadow_triggers_without_touching_audio() -> None:
+    recorder = FakeRecorder()
+    session_recorder = FakeSessionRecorder()
+    shadow_event = ShadowPredictionEvent(
+        frame_index=7,
+        timestamp=FrameTimestamp(seconds=1.0),
+        timing_probability=0.81,
+        threshold=0.6,
+        run_length=2,
+        gesture=GestureType.SNARE,
+        gesture_confidence=0.92,
+        class_probabilities={"kick": 0.08, "snare": 0.92},
+        heuristic_triggered_on_peak_frame=False,
+        heuristic_gesture_types_on_peak_frame=(),
+    )
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "shadow",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [CameraFrame(image=FakeFrame("frame-0"), captured_at=1.0, frame_index=7)]
+        ),
+        tracker=FakeTracker([make_pose(1.0)]),
+        detector=FakeDetector(events_by_frame=[[]], candidates_by_frame=[()], cooldowns=[0.0]),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False]),
+        recorder=recorder,
+        session_recorder=session_recorder,
+        predictive_shadow_runner=FakePredictiveShadowRunner((shadow_event,)),
+    )
+
+    runtime.process_next_frame()
+
+    assert runtime.audio.triggers == []
+    assert recorder.predictive_shadow_triggers[0]["predicted_gesture"] is GestureType.SNARE
+    assert session_recorder.predictive_shadow_triggers[0]["gesture"] == "snare"
+    assert runtime.overlay.calls[0][1].predictive_status == "p=0.23/0.30 top=kick 0.71"
+
+
+def test_runtime_uses_predictive_primary_mode_to_drive_audio() -> None:
+    recorder = FakeRecorder()
+    session_recorder = FakeSessionRecorder()
+    predictive_event = ShadowPredictionEvent(
+        frame_index=9,
+        timestamp=FrameTimestamp(seconds=1.10),
+        timing_probability=0.84,
+        threshold=0.6,
+        run_length=2,
+        gesture=GestureType.KICK,
+        gesture_confidence=0.91,
+        class_probabilities={"kick": 0.91, "snare": 0.09},
+        heuristic_triggered_on_peak_frame=True,
+        heuristic_gesture_types_on_peak_frame=("snare",),
+    )
+    heuristic_event = GestureEvent(
+        gesture=GestureType.SNARE,
+        confidence=0.77,
+        hand="right",
+        timestamp=FrameTimestamp(seconds=1.25),
+        label="Wrist collision trigger",
+    )
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "primary",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [CameraFrame(image=FakeFrame("frame-0"), captured_at=1.25, frame_index=10)]
+        ),
+        tracker=FakeTracker([make_pose(1.25)]),
+        detector=FakeDetector(
+            events_by_frame=[[heuristic_event]],
+            candidates_by_frame=[()],
+            cooldowns=[0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False]),
+        recorder=recorder,
+        session_recorder=session_recorder,
+        predictive_shadow_runner=FakePredictiveShadowRunner((predictive_event,)),
+    )
+
+    runtime.process_next_frame()
+
+    assert len(runtime.audio.triggers) == 1
+    assert runtime.audio.triggers[0].gesture is GestureType.KICK
+    assert runtime.audio.triggers[0].intensity == pytest.approx(0.84)
+    assert recorder.predictive_shadow_triggers == []
+    assert recorder.predictive_live_triggers[0]["predicted_gesture"] is GestureType.KICK
+    assert recorder.predictive_live_triggers[0]["timestamp"] == pytest.approx(1.25)
+    assert recorder.predictive_live_triggers[0]["frame_index"] == 10
+    assert session_recorder.predictive_shadow_triggers == []
+    assert session_recorder.triggers[0].gesture is GestureType.KICK
+    assert session_recorder.triggers[0].timestamp.seconds == pytest.approx(1.25)
+    assert session_recorder.triggers[0].label == "Predictive kick trigger"
+    assert runtime.overlay.calls[0][1].confirmed_gesture is not None
+    assert runtime.overlay.calls[0][1].confirmed_gesture.timestamp.seconds == pytest.approx(1.25)
+
+
+def test_runtime_predictive_hybrid_mode_shows_active_arm_while_waiting_for_completion() -> None:
+    latest_status = PredictiveStatus(
+        available_window_frames=24,
+        required_window_size=24,
+        threshold=0.6,
+        timing_probability=0.84,
+        predicted_gesture=GestureType.KICK,
+        predicted_gesture_confidence=0.91,
+        class_probabilities={"kick": 0.91, "snare": 0.09},
+    )
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "hybrid",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [CameraFrame(image=FakeFrame("frame-0"), captured_at=1.0, frame_index=9)]
+        ),
+        tracker=FakeTracker([make_pose(1.0)]),
+        detector=FakeDetector(events_by_frame=[[]], candidates_by_frame=[()], cooldowns=[0.0]),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False]),
+        predictive_shadow_runner=FakePredictiveShadowRunner(
+            (),
+            status_summary="p=0.84/0.60 top=kick 0.91",
+            latest_status=latest_status,
+            prediction_horizon_frames=3,
+        ),
+    )
+
+    runtime.process_next_frame()
+
+    assert runtime.audio.triggers == []
+    assert runtime.overlay.calls[0][1].predictive_status == (
+        "p=0.84/0.60 top=kick 0.91 arm=kick 0.91 ttl=4"
+    )
+
+
+def test_runtime_predictive_hybrid_mode_fires_on_matching_completion() -> None:
+    recorder = FakeRecorder()
+    session_recorder = FakeSessionRecorder()
+    latest_status = PredictiveStatus(
+        available_window_frames=24,
+        required_window_size=24,
+        threshold=0.6,
+        timing_probability=0.84,
+        predicted_gesture=GestureType.KICK,
+        predicted_gesture_confidence=0.91,
+        class_probabilities={"kick": 0.91, "snare": 0.09},
+    )
+    heuristic_event = GestureEvent(
+        gesture=GestureType.KICK,
+        confidence=0.77,
+        hand="right",
+        timestamp=FrameTimestamp(seconds=1.25),
+        label="Downward strike trigger",
+    )
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "hybrid",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [CameraFrame(image=FakeFrame("frame-0"), captured_at=1.25, frame_index=9)]
+        ),
+        tracker=FakeTracker([make_pose(1.25)]),
+        detector=FakeDetector(
+            events_by_frame=[[heuristic_event]],
+            candidates_by_frame=[()],
+            cooldowns=[0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False]),
+        recorder=recorder,
+        session_recorder=session_recorder,
+        predictive_shadow_runner=FakePredictiveShadowRunner(
+            (),
+            status_summary="p=0.84/0.60 top=kick 0.91",
+            latest_status=latest_status,
+        ),
+    )
+
+    runtime.process_next_frame()
+
+    assert len(runtime.audio.triggers) == 1
+    assert runtime.audio.triggers[0].gesture is GestureType.KICK
+    assert runtime.audio.triggers[0].intensity == pytest.approx(0.77)
+    assert recorder.predictive_shadow_triggers == []
+    assert recorder.predictive_live_triggers[0]["predicted_gesture"] is GestureType.KICK
+    assert recorder.predictive_live_triggers[0]["timing_probability"] == pytest.approx(0.84)
+    assert session_recorder.predictive_shadow_triggers == []
+    assert session_recorder.triggers[0].gesture is GestureType.KICK
+    assert session_recorder.triggers[0].label == "Predictive-arm kick completion"
+    assert runtime.overlay.calls[0][1].predictive_status == "p=0.84/0.60 top=kick 0.91 arm=--"
+
+
+def test_runtime_predictive_hybrid_mode_rejects_mismatched_completion() -> None:
+    recorder = FakeRecorder()
+    latest_status = PredictiveStatus(
+        available_window_frames=24,
+        required_window_size=24,
+        threshold=0.6,
+        timing_probability=0.84,
+        predicted_gesture=GestureType.KICK,
+        predicted_gesture_confidence=0.91,
+        class_probabilities={"kick": 0.91, "snare": 0.09},
+    )
+    heuristic_event = GestureEvent(
+        gesture=GestureType.SNARE,
+        confidence=0.77,
+        hand="right",
+        timestamp=FrameTimestamp(seconds=1.25),
+        label="Wrist collision trigger",
+    )
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "hybrid",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [CameraFrame(image=FakeFrame("frame-0"), captured_at=1.25, frame_index=9)]
+        ),
+        tracker=FakeTracker([make_pose(1.25)]),
+        detector=FakeDetector(
+            events_by_frame=[[heuristic_event]],
+            candidates_by_frame=[()],
+            cooldowns=[0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False]),
+        recorder=recorder,
+        predictive_shadow_runner=FakePredictiveShadowRunner(
+            (),
+            status_summary="p=0.84/0.60 top=kick 0.91",
+            latest_status=latest_status,
+        ),
+    )
+
+    runtime.process_next_frame()
+
+    assert runtime.audio.triggers == []
+    assert recorder.predictive_live_triggers == []
+    assert runtime.overlay.calls[0][1].predictive_status == "p=0.84/0.60 top=kick 0.91 arm=--"
 
 
 def test_compute_fps_handles_initial_non_increasing_and_increasing_timestamps() -> None:

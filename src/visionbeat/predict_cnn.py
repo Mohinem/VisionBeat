@@ -428,17 +428,26 @@ def load_inference_dataset(path: Path) -> InferenceDataset:
         if target_name is not None and target_name not in {
             "completion_frame_binary",
             "completion_within_next_k_frames",
+            "completion_within_last_k_frames",
+            "arm_frame_binary",
+            "arm_within_next_k_frames",
+            "arm_within_last_k_frames",
         }:
             raise ValueError(
                 f"Dataset {path} has unsupported target_name {target_name!r}. "
-                "Expected a supported VisionBeat completion target."
+                "Expected a supported VisionBeat timing target."
             )
         horizon_frames = (
             int(archive["horizon_frames"].item()) if "horizon_frames" in archive.files else 0
         )
-        if target_name == "completion_within_next_k_frames" and horizon_frames <= 0:
+        if target_name in {
+            "completion_within_next_k_frames",
+            "completion_within_last_k_frames",
+            "arm_within_next_k_frames",
+            "arm_within_last_k_frames",
+        } and horizon_frames <= 0:
             raise ValueError(
-                f"Dataset {path} has invalid horizon_frames {horizon_frames} for future targets."
+                f"Dataset {path} has invalid horizon_frames {horizon_frames} for tolerant timing targets."
             )
         stride = int(archive["stride"].item()) if "stride" in archive.files else 1
         if stride <= 0:
@@ -781,6 +790,20 @@ def _describe_positive_target_meaning(*, target_name: str, horizon_frames: int) 
         return "gesture completion occurs at the last frame of the window"
     if target_name == "completion_within_next_k_frames":
         return f"gesture completion occurs within the next {horizon_frames} frame(s) after the window"
+    if target_name == "completion_within_last_k_frames":
+        return (
+            "gesture completion occurred within the last "
+            f"{horizon_frames} frame(s) ending at the window"
+        )
+    if target_name == "arm_frame_binary":
+        return "early-arm timing is active at the last frame of the window"
+    if target_name == "arm_within_next_k_frames":
+        return f"early-arm timing becomes active within the next {horizon_frames} frame(s) after the window"
+    if target_name == "arm_within_last_k_frames":
+        return (
+            "early-arm timing became active within the last "
+            f"{horizon_frames} frame(s) ending at the window"
+        )
     raise ValueError(f"Unsupported target_name {target_name!r}.")
 
 

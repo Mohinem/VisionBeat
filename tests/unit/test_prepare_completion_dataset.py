@@ -222,10 +222,25 @@ def test_prepare_completion_dataset_supports_future_completion_targets(tmp_path:
     }
     landmarks_by_marker = {
         1: build_landmarks_by_frame(
-            left_wrist_positions=((0.20, 0.52), (0.24, 0.56), (0.28, 0.60), (0.32, 0.64), (0.36, 0.68), (0.40, 0.72))
+            left_wrist_positions=(
+                (0.20, 0.52),
+                (0.24, 0.56),
+                (0.28, 0.60),
+                (0.32, 0.64),
+                (0.36, 0.68),
+                (0.40, 0.72),
+            )
         ),
         2: build_landmarks_by_frame(
-            left_wrist_positions=((0.18, 0.48), (0.20, 0.52), (0.22, 0.56), (0.24, 0.60), (0.26, 0.64), (0.28, 0.68), (0.30, 0.72))
+            left_wrist_positions=(
+                (0.18, 0.48),
+                (0.20, 0.52),
+                (0.22, 0.56),
+                (0.24, 0.60),
+                (0.26, 0.64),
+                (0.28, 0.68),
+                (0.30, 0.72),
+            )
         ),
     }
 
@@ -252,6 +267,158 @@ def test_prepare_completion_dataset_supports_future_completion_targets(tmp_path:
     assert archive["target_name"].item() == "completion_within_next_k_frames"
     assert int(archive["horizon_frames"].item()) == 2
     assert archive["y_train"].tolist() == [0, 1, 1, 0]
+
+
+def test_prepare_completion_dataset_supports_recent_completion_targets(tmp_path: Path) -> None:
+    rec1_video = tmp_path / "rec1.mp4"
+    rec2_video = tmp_path / "rec2.mp4"
+    rec1_video.write_bytes(b"")
+    rec2_video.write_bytes(b"")
+
+    rec1_labels = tmp_path / "rec1_labels.csv"
+    rec2_labels = tmp_path / "rec2_labels.csv"
+    rec1_labels.write_text(
+        "recording_id,frame_index,gesture\n"
+        "rec1,2,kick\n"
+        "rec1,5,snare\n",
+        encoding="utf-8",
+    )
+    rec2_labels.write_text(
+        "recording_id,frame_index,gesture\n"
+        "rec2,3,kick\n"
+        "rec2,6,snare\n",
+        encoding="utf-8",
+    )
+
+    frames_by_path = {
+        rec1_video.as_posix(): build_frames(marker=1, frame_count=6),
+        rec2_video.as_posix(): build_frames(marker=2, frame_count=7),
+    }
+    landmarks_by_marker = {
+        1: build_landmarks_by_frame(
+            left_wrist_positions=((0.20, 0.52), (0.24, 0.56), (0.28, 0.60), (0.32, 0.64), (0.36, 0.68), (0.40, 0.72))
+        ),
+        2: build_landmarks_by_frame(
+            left_wrist_positions=((0.18, 0.48), (0.20, 0.52), (0.22, 0.56), (0.24, 0.60), (0.26, 0.64), (0.28, 0.68), (0.30, 0.72))
+        ),
+    }
+
+    result = prepare_completion_dataset(
+        (
+            RecordingDatasetInput("rec1", rec1_video, rec1_labels),
+            RecordingDatasetInput("rec2", rec2_video, rec2_labels),
+        ),
+        output_dir=tmp_path / "prepared_recent",
+        tracker_config=TrackerConfig(),
+        cv2_module=FakeCV2(frames_by_path, fps=20.0),
+        pose_provider_factory=lambda _: FakePoseProvider(landmarks_by_marker),
+        window_size=3,
+        stride=1,
+        validation_recording_id="rec2",
+        validation_fraction=0.5,
+        target="completion_within_last_k_frames",
+        horizon_frames=2,
+    )
+
+    archive = np.load(result.output_path)
+    assert result.target_name == "completion_within_last_k_frames"
+    assert result.horizon_frames == 2
+    assert archive["target_name"].item() == "completion_within_last_k_frames"
+    assert int(archive["horizon_frames"].item()) == 2
+    assert archive["y_train"].tolist() == [1, 1, 0, 1]
+
+
+def test_prepare_completion_dataset_supports_arm_targets_with_v2_labels(
+    tmp_path: Path,
+) -> None:
+    rec1_video = tmp_path / "rec1_v2.mp4"
+    rec2_video = tmp_path / "rec2_v2.mp4"
+    rec1_video.write_bytes(b"")
+    rec2_video.write_bytes(b"")
+
+    rec1_labels = tmp_path / "rec1_v2_labels.csv"
+    rec2_labels = tmp_path / "rec2_v2_labels.csv"
+    rec1_labels.write_text(
+        "recording_id,event_id,gesture_label,arm_start_frame,completion_frame\n"
+        "rec1,evt-001,kick,1,1\n"
+        "rec1,evt-002,snare,4,5\n",
+        encoding="utf-8",
+    )
+    rec2_labels.write_text(
+        "recording_id,event_id,gesture_label,arm_start_frame,completion_frame\n"
+        "rec2,evt-101,kick,2,3\n"
+        "rec2,evt-102,snare,5,6\n",
+        encoding="utf-8",
+    )
+
+    frames_by_path = {
+        rec1_video.as_posix(): build_frames(marker=1, frame_count=6),
+        rec2_video.as_posix(): build_frames(marker=2, frame_count=7),
+    }
+    landmarks_by_marker = {
+        1: build_landmarks_by_frame(
+            left_wrist_positions=(
+                (0.20, 0.52),
+                (0.24, 0.56),
+                (0.28, 0.60),
+                (0.32, 0.64),
+                (0.36, 0.68),
+                (0.40, 0.72),
+            )
+        ),
+        2: build_landmarks_by_frame(
+            left_wrist_positions=(
+                (0.18, 0.48),
+                (0.20, 0.52),
+                (0.22, 0.56),
+                (0.24, 0.60),
+                (0.26, 0.64),
+                (0.28, 0.68),
+                (0.30, 0.72),
+            )
+        ),
+    }
+
+    result = prepare_completion_dataset(
+        (
+            RecordingDatasetInput("rec1", rec1_video, rec1_labels),
+            RecordingDatasetInput("rec2", rec2_video, rec2_labels),
+        ),
+        output_dir=tmp_path / "prepared_arm",
+        tracker_config=TrackerConfig(),
+        cv2_module=FakeCV2(frames_by_path, fps=20.0),
+        pose_provider_factory=lambda _: FakePoseProvider(landmarks_by_marker),
+        window_size=2,
+        stride=1,
+        validation_recording_id="rec2",
+        validation_fraction=0.5,
+        target="arm_frame_binary",
+    )
+
+    archive = np.load(result.output_path)
+    labeled_rows = list(
+        csv.DictReader(
+            (tmp_path / "prepared_arm" / "rec1_labeled.csv").open(
+                "r", encoding="utf-8", newline=""
+            )
+        )
+    )
+
+    assert result.target_name == "arm_frame_binary"
+    assert archive["target_name"].item() == "arm_frame_binary"
+    assert archive["y_train"].tolist() == [1, 0, 0, 1, 1]
+    assert archive["train_target_gesture_labels"].tolist() == [
+        "kick",
+        "",
+        "",
+        "snare",
+        "snare",
+    ]
+    assert labeled_rows[1]["event_id"] == "evt-001"
+    assert labeled_rows[1]["is_arm_frame"] == "True"
+    assert labeled_rows[1]["is_completion"] == "True"
+    assert labeled_rows[4]["event_id"] == "evt-002"
+    assert labeled_rows[4]["is_arm_frame"] == "True"
 
 
 def build_frames(*, marker: int, frame_count: int) -> list[np.ndarray]:

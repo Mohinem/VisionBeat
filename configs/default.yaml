@@ -3,8 +3,15 @@ camera:
   width: 1280
   height: 720
   fps: 30
+  backend: v4l2
+  fourcc: MJPG
   mirror: true
   window_name: VisionBeat
+
+runtime:
+  async_pipeline: true
+  target_render_fps: 30
+  idle_sleep_seconds: 0.002
 
 tracker:
   # Gesture detection consumes TrackerOutput, so backends only need to map
@@ -74,3 +81,16 @@ logging:
   event_log_format: jsonl
   session_recording_path: null
   session_recording_mode: tracker_outputs
+
+predictive:
+  # disabled = heuristics only
+  # shadow = heuristics drive audio, predictive CNN+decoder logs passively
+  # primary = predictive CNN+decoder drives audio
+  # hybrid = predictive arms the gesture, heuristic completion fires audio
+  mode: hybrid
+  timing_checkpoint_path: outputs/future8_w24_r1r2_train_r3_val/visionbeat_cnn_run_001/checkpoints/best_model.pt
+  gesture_checkpoint_path: outputs/gesture_classifier_future8_r1r2_train_r3_val/visionbeat_gesture_classifier_run_001/checkpoints/best_model.pt
+  threshold: 0.60
+  trigger_cooldown_frames: 6
+  trigger_max_gap_frames: 1
+  device: auto

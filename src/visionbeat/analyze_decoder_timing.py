@@ -15,7 +15,7 @@ import numpy as np
 from visionbeat.cnn_trigger import PositiveEventSpan, group_positive_event_spans
 from visionbeat.predict_cnn import InferenceDataset, load_inference_dataset
 
-_FRAME_LABEL_COLUMNS: Final[tuple[str, ...]] = ("frame_index", "frame_no")
+_FRAME_LABEL_COLUMNS: Final[tuple[str, ...]] = ("completion_frame", "frame_index", "frame_no")
 _GESTURE_LABEL_COLUMNS: Final[tuple[str, ...]] = ("gesture_label", "gesture", "gesture_type")
 _RECORDING_ID_COLUMNS: Final[tuple[str, ...]] = ("recording_id",)
 

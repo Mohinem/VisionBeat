@@ -219,6 +219,7 @@ class TrackerOutput:
 
     timestamp: FrameTimestamp
     landmarks: dict[str, LandmarkPoint] = field(default_factory=dict)
+    raw_landmarks: dict[str, LandmarkPoint] = field(default_factory=dict)
     candidates: tuple[DetectionCandidate, ...] = ()
     person_detected: bool = False
     status: str = "no_person_detected"
@@ -229,6 +230,10 @@ class TrackerOutput:
             name: value if isinstance(value, LandmarkPoint) else LandmarkPoint.from_dict(value)
             for name, value in self.landmarks.items()
         }
+        normalized_raw_landmarks = {
+            name: value if isinstance(value, LandmarkPoint) else LandmarkPoint.from_dict(value)
+            for name, value in self.raw_landmarks.items()
+        }
         normalized_candidates = tuple(
             candidate
             if isinstance(candidate, DetectionCandidate)
@@ -238,6 +243,7 @@ class TrackerOutput:
         status = self.status.strip() or "unknown"
         person_detected = bool(self.person_detected or normalized_landmarks)
         object.__setattr__(self, "landmarks", normalized_landmarks)
+        object.__setattr__(self, "raw_landmarks", normalized_raw_landmarks)
         object.__setattr__(self, "candidates", normalized_candidates)
         object.__setattr__(self, "person_detected", person_detected)
         object.__setattr__(self, "status", status)
@@ -254,6 +260,10 @@ class TrackerOutput:
                 name: point.mirrored_horizontally()
                 for name, point in self.landmarks.items()
             },
+            raw_landmarks={
+                name: point.mirrored_horizontally()
+                for name, point in self.raw_landmarks.items()
+            },
             candidates=self.candidates,
             person_detected=self.person_detected,
             status=self.status,
@@ -264,6 +274,7 @@ class TrackerOutput:
         return {
             "timestamp": self.timestamp.to_dict(),
             "landmarks": {name: point.to_dict() for name, point in self.landmarks.items()},
+            "raw_landmarks": {name: point.to_dict() for name, point in self.raw_landmarks.items()},
             "candidates": [candidate.to_dict() for candidate in self.candidates],
             "person_detected": self.person_detected,
             "status": self.status,
@@ -277,6 +288,10 @@ class TrackerOutput:
             landmarks={
                 name: LandmarkPoint.from_dict(point)
                 for name, point in payload.get("landmarks", {}).items()
+            },
+            raw_landmarks={
+                name: LandmarkPoint.from_dict(point)
+                for name, point in payload.get("raw_landmarks", {}).items()
             },
             candidates=tuple(
                 DetectionCandidate.from_dict(candidate)
@@ -294,11 +309,16 @@ class RenderState:
     pose: TrackerOutput
     frame_index: int
     fps: float | None = None
+    capture_fps: float | None = None
+    inference_fps: float | None = None
+    render_fps: float | None = None
     current_candidate: DetectionCandidate | None = None
     confirmed_gesture: GestureEvent | None = None
     cooldown_remaining_seconds: float = 0.0
     detector_status: str | None = None
+    predictive_status: str | None = None
     audio_status: str | None = None
+    pipeline_latency_ms: float | None = None
 
     def __post_init__(self) -> None:
         """Validate loop-derived overlay state values."""
@@ -306,11 +326,14 @@ class RenderState:
         if frame_index < 0:
             raise ValueError("frame_index must be greater than or equal to zero.")
         object.__setattr__(self, "frame_index", frame_index)
-        if self.fps is not None:
-            fps = _coerce_float(self.fps, field_name="fps")
+        for field_name in ("fps", "capture_fps", "inference_fps", "render_fps"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            fps = _coerce_float(value, field_name=field_name)
             if fps <= 0.0:
-                raise ValueError("fps must be greater than zero when provided.")
-            object.__setattr__(self, "fps", fps)
+                raise ValueError(f"{field_name} must be greater than zero when provided.")
+            object.__setattr__(self, field_name, fps)
         cooldown = _coerce_float(
             self.cooldown_remaining_seconds,
             field_name="cooldown_remaining_seconds",
@@ -318,8 +341,15 @@ class RenderState:
         if cooldown < 0.0:
             raise ValueError("cooldown_remaining_seconds must be greater than or equal to zero.")
         object.__setattr__(self, "cooldown_remaining_seconds", cooldown)
+        if self.pipeline_latency_ms is not None:
+            latency = _coerce_float(self.pipeline_latency_ms, field_name="pipeline_latency_ms")
+            if latency < 0.0:
+                raise ValueError("pipeline_latency_ms must be greater than or equal to zero.")
+            object.__setattr__(self, "pipeline_latency_ms", latency)
         if self.detector_status is not None:
             object.__setattr__(self, "detector_status", self.detector_status.strip() or None)
+        if self.predictive_status is not None:
+            object.__setattr__(self, "predictive_status", self.predictive_status.strip() or None)
         if self.audio_status is not None:
             object.__setattr__(self, "audio_status", self.audio_status.strip() or None)
 

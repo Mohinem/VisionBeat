@@ -154,6 +154,8 @@ class CameraConfig:
     width: int = 1280
     height: int = 720
     fps: int = 30
+    backend: str = "auto"
+    fourcc: str | None = None
     mirror: bool = True
     window_name: str = "VisionBeat"
 
@@ -162,13 +164,36 @@ class CameraConfig:
         """Build camera configuration from a validated mapping."""
         reader = _ConfigReader(payload, path="camera")
         reader.reject_unknown_keys(
-            {"device_index", "width", "height", "fps", "mirror", "window_name"}
+            {
+                "device_index",
+                "width",
+                "height",
+                "fps",
+                "backend",
+                "fourcc",
+                "mirror",
+                "window_name",
+            }
         )
+        backend = reader.string("backend", default="auto", non_empty=True) or "auto"
+        backend = backend.lower()
+        if backend not in {"auto", "v4l2", "dshow", "msmf", "avfoundation", "gstreamer", "ffmpeg"}:
+            raise ConfigError(
+                "camera.backend: must be one of 'auto', 'v4l2', 'dshow', "
+                "'msmf', 'avfoundation', 'gstreamer', or 'ffmpeg'."
+            )
+        fourcc = reader.string("fourcc", default=None, non_empty=True)
+        if fourcc is not None:
+            fourcc = fourcc.upper()
+            if len(fourcc) != 4:
+                raise ConfigError("camera.fourcc: must be exactly four characters when set.")
         return cls(
             device_index=reader.integer("device_index", default=0, minimum=0),
             width=reader.integer("width", default=1280, minimum=1),
             height=reader.integer("height", default=720, minimum=1),
             fps=reader.integer("fps", default=30, minimum=1),
+            backend=backend,
+            fourcc=fourcc,
             mirror=reader.boolean("mirror", default=True),
             window_name=reader.string("window_name", default="VisionBeat", non_empty=True)
             or "VisionBeat",
@@ -186,6 +211,8 @@ class CameraConfig:
             "width": self.width,
             "height": self.height,
             "fps": self.fps,
+            "backend": self.backend,
+            "fourcc": self.fourcc,
             "mirror": self.mirror,
             "window_name": self.window_name,
         }
@@ -804,16 +831,170 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PredictiveConfig:
+    """Optional predictive inference configuration for live runtime modes."""
+
+    mode: str = "disabled"
+    timing_checkpoint_path: str | None = None
+    gesture_checkpoint_path: str | None = None
+    threshold: float = 0.6
+    trigger_cooldown_frames: int = 6
+    trigger_max_gap_frames: int = 1
+    device: str = "auto"
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether predictive inference is active in any runtime mode."""
+        return self.mode != "disabled"
+
+    @property
+    def heuristic_drives_audio(self) -> bool:
+        """Return whether heuristic detections should trigger live audio."""
+        return self.mode in {"disabled", "shadow"}
+
+    @property
+    def predictive_logs_shadow(self) -> bool:
+        """Return whether predictive outputs should be logged as passive shadow events."""
+        return self.mode == "shadow"
+
+    @property
+    def predictive_drives_audio(self) -> bool:
+        """Return whether predictive outputs should trigger live audio."""
+        return self.mode == "primary"
+
+    @property
+    def predictive_uses_completion_gate(self) -> bool:
+        """Return whether predictive outputs should arm a completion-aligned trigger gate."""
+        return self.mode == "hybrid"
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> PredictiveConfig:
+        """Build predictive-model configuration from a validated mapping."""
+        reader = _ConfigReader(payload, path="predictive")
+        reader.reject_unknown_keys(
+            {
+                "enabled",
+                "mode",
+                "timing_checkpoint_path",
+                "gesture_checkpoint_path",
+                "threshold",
+                "trigger_cooldown_frames",
+                "trigger_max_gap_frames",
+                "device",
+            }
+        )
+        enabled = reader.boolean("enabled", default=False) if "enabled" in reader.payload else None
+        mode = reader.string("mode", default=None)
+        if mode is None:
+            resolved_mode = "shadow" if enabled else "disabled"
+        else:
+            resolved_mode = mode.lower()
+        if resolved_mode not in {"disabled", "shadow", "primary", "hybrid"}:
+            raise ConfigError(
+                "predictive.mode: must be one of 'disabled', 'shadow', 'primary', or 'hybrid'."
+            )
+        if enabled is not None and enabled != (resolved_mode != "disabled"):
+            raise ConfigError("predictive.enabled: conflicts with predictive.mode.")
+        timing_checkpoint_path = reader.string("timing_checkpoint_path", default=None)
+        gesture_checkpoint_path = reader.string("gesture_checkpoint_path", default=None)
+        device = (reader.string("device", default="auto", non_empty=True) or "auto").lower()
+        if device not in {"auto", "cpu", "cuda"}:
+            raise ConfigError("predictive.device: must be one of 'auto', 'cpu', or 'cuda'.")
+        config = cls(
+            mode=resolved_mode,
+            timing_checkpoint_path=timing_checkpoint_path or None,
+            gesture_checkpoint_path=gesture_checkpoint_path or None,
+            threshold=reader.number("threshold", default=0.6, minimum=0.0, maximum=1.0),
+            trigger_cooldown_frames=reader.integer(
+                "trigger_cooldown_frames",
+                default=6,
+                minimum=0,
+            ),
+            trigger_max_gap_frames=reader.integer(
+                "trigger_max_gap_frames",
+                default=1,
+                minimum=0,
+            ),
+            device=device,
+        )
+        if not config.enabled:
+            return config
+        if config.timing_checkpoint_path is None:
+            raise ConfigError(
+                "predictive.timing_checkpoint_path: must be set when predictive is enabled."
+            )
+        if config.gesture_checkpoint_path is None:
+            raise ConfigError(
+                "predictive.gesture_checkpoint_path: must be set when predictive is enabled."
+            )
+        return config
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the predictive-model configuration into a dictionary."""
+        return {
+            "enabled": self.enabled,
+            "mode": self.mode,
+            "timing_checkpoint_path": self.timing_checkpoint_path,
+            "gesture_checkpoint_path": self.gesture_checkpoint_path,
+            "threshold": self.threshold,
+            "trigger_cooldown_frames": self.trigger_cooldown_frames,
+            "trigger_max_gap_frames": self.trigger_max_gap_frames,
+            "device": self.device,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeConfig:
+    """Live-runtime behavior for capture, inference, and preview refresh."""
+
+    async_pipeline: bool = False
+    target_render_fps: int = 30
+    idle_sleep_seconds: float = 0.002
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> RuntimeConfig:
+        """Build runtime configuration from a validated mapping."""
+        reader = _ConfigReader(payload, path="runtime")
+        reader.reject_unknown_keys(
+            {
+                "async_pipeline",
+                "target_render_fps",
+                "idle_sleep_seconds",
+            }
+        )
+        return cls(
+            async_pipeline=reader.boolean("async_pipeline", default=False),
+            target_render_fps=reader.integer("target_render_fps", default=30, minimum=1),
+            idle_sleep_seconds=reader.number(
+                "idle_sleep_seconds",
+                default=0.002,
+                minimum=0.0,
+                inclusive_min=False,
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the runtime configuration into a dictionary."""
+        return {
+            "async_pipeline": self.async_pipeline,
+            "target_render_fps": self.target_render_fps,
+            "idle_sleep_seconds": self.idle_sleep_seconds,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     """Top-level application configuration aggregating all subsystem settings."""
 
     camera: CameraConfig = field(default_factory=CameraConfig)
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     gestures: GestureConfig = field(default_factory=GestureConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     transport: TransportConfig = field(default_factory=TransportConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    predictive: PredictiveConfig = field(default_factory=PredictiveConfig)
 
     @property
     def overlay(self) -> OverlayConfig:
@@ -830,10 +1011,21 @@ class AppConfig:
         """Create an application configuration from a nested mapping."""
         reader = _ConfigReader(payload, path="")
         reader.reject_unknown_keys(
-            {"camera", "tracker", "gestures", "audio", "transport", "debug", "logging"}
+            {
+                "camera",
+                "runtime",
+                "tracker",
+                "gestures",
+                "audio",
+                "transport",
+                "debug",
+                "logging",
+                "predictive",
+            }
         )
         return cls(
             camera=CameraConfig.from_mapping(reader.child_mapping("camera", default={}).payload),
+            runtime=RuntimeConfig.from_mapping(reader.child_mapping("runtime", default={}).payload),
             tracker=TrackerConfig.from_mapping(reader.child_mapping("tracker", default={}).payload),
             gestures=GestureConfig.from_mapping(
                 reader.child_mapping("gestures", default={}).payload
@@ -844,18 +1036,23 @@ class AppConfig:
             ),
             debug=DebugConfig.from_mapping(reader.child_mapping("debug", default={}).payload),
             logging=LoggingConfig.from_mapping(reader.child_mapping("logging", default={}).payload),
+            predictive=PredictiveConfig.from_mapping(
+                reader.child_mapping("predictive", default={}).payload
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the application configuration into a dictionary."""
         return {
             "camera": self.camera.to_dict(),
+            "runtime": self.runtime.to_dict(),
             "tracker": self.tracker.to_dict(),
             "gestures": self.gestures.to_dict(),
             "audio": self.audio.to_dict(),
             "transport": self.transport.to_dict(),
             "debug": self.debug.to_dict(),
             "logging": self.logging.to_dict(),
+            "predictive": self.predictive.to_dict(),
         }
 
 

@@ -117,6 +117,62 @@ def test_build_training_samples_supports_future_completion_targets(tmp_path: Pat
     assert dataset.window_end_frame_indices.tolist() == [1, 2, 3, 4]
 
 
+def test_build_training_samples_supports_recent_completion_targets(tmp_path: Path) -> None:
+    frame_table_path = build_feature_table(tmp_path)
+    schema, frame_rows = load_frame_feature_rows(frame_table_path)
+
+    dataset = build_training_samples(
+        frame_rows,
+        window_size=2,
+        stride=1,
+        target="completion_within_last_k_frames",
+        horizon_frames=2,
+        feature_schema=schema,
+    )
+
+    assert dataset.X.shape == (4, 2, len(CANONICAL_FEATURE_NAMES))
+    assert dataset.y.tolist() == [1, 1, 1, 1]
+    assert dataset.target_gesture_labels.tolist() == ["kick", "kick", "snare", "snare"]
+    assert dataset.window_end_frame_indices.tolist() == [1, 2, 3, 4]
+
+
+def test_build_training_samples_supports_arm_frame_targets(tmp_path: Path) -> None:
+    frame_table_path = build_v2_feature_table(tmp_path)
+    schema, frame_rows = load_frame_feature_rows(frame_table_path)
+
+    dataset = build_training_samples(
+        frame_rows,
+        window_size=2,
+        stride=1,
+        target="arm_frame_binary",
+        feature_schema=schema,
+    )
+
+    assert dataset.X.shape == (5, 2, len(CANONICAL_FEATURE_NAMES))
+    assert dataset.y.tolist() == [1, 0, 0, 1, 1]
+    assert dataset.target_gesture_labels.tolist() == ["kick", "", "", "snare", "snare"]
+    assert dataset.window_end_frame_indices.tolist() == [1, 2, 3, 4, 5]
+
+
+def test_build_training_samples_supports_future_arm_targets(tmp_path: Path) -> None:
+    frame_table_path = build_v2_feature_table(tmp_path)
+    schema, frame_rows = load_frame_feature_rows(frame_table_path)
+
+    dataset = build_training_samples(
+        frame_rows,
+        window_size=2,
+        stride=1,
+        target="arm_within_next_k_frames",
+        horizon_frames=2,
+        feature_schema=schema,
+    )
+
+    assert dataset.X.shape == (5, 2, len(CANONICAL_FEATURE_NAMES))
+    assert dataset.y.tolist() == [0, 1, 1, 1, 0]
+    assert dataset.target_gesture_labels.tolist() == ["", "snare", "snare", "snare", ""]
+    assert dataset.window_end_frame_indices.tolist() == [1, 2, 3, 4, 5]
+
+
 def build_feature_table(tmp_path: Path) -> Path:
     video_path = tmp_path / "session.mp4"
     video_path.write_bytes(b"")
@@ -139,6 +195,34 @@ def build_feature_table(tmp_path: Path) -> Path:
         tracker_config=TrackerConfig(),
         cv2_module=FakeCV2(capture),
         pose_provider_factory=lambda _: FakePoseProvider(build_landmarks_by_frame()),
+    )
+    return output_path
+
+
+def build_v2_feature_table(tmp_path: Path) -> Path:
+    video_path = tmp_path / "session_v2.mp4"
+    video_path.write_bytes(b"")
+    labels_path = tmp_path / "labels_v2.csv"
+    labels_path.write_text(
+        "recording_id,event_id,gesture_label,arm_start_frame,completion_frame\n"
+        "session_v2,evt-001,kick,1,1\n"
+        "session_v2,evt-002,snare,4,5\n",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "features_v2.csv"
+    capture = FakeCapture(
+        [np.zeros((2, 2, 3), dtype=np.uint8) for _ in range(6)],
+        fps=20.0,
+    )
+    extract_dataset_features(
+        video_path,
+        output_path=output_path,
+        labels_path=labels_path,
+        tracker_config=TrackerConfig(),
+        cv2_module=FakeCV2(capture),
+        pose_provider_factory=lambda _: FakePoseProvider(
+            [*build_landmarks_by_frame(), build_landmarks_by_frame()[-1]]
+        ),
     )
     return output_path
 

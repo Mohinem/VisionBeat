@@ -140,6 +140,24 @@ def test_overlay_renderer_skeleton_only_hud_preserves_landmark_labels_without_pa
     )
 
 
+def test_overlay_renderer_debug_panel_includes_predictive_status() -> None:
+    fake_cv2 = FakeCV2()
+    renderer = OverlayRenderer(OverlayConfig(), cv2_module=fake_cv2)
+    frame = FakeFrame(120, 160)
+    state = RenderState(
+        pose=make_pose(),
+        frame_index=4,
+        predictive_status="p=0.23/0.30 top=kick 0.71",
+    )
+
+    renderer.render(frame, state)
+
+    assert any(
+        name == "putText" and args[1] == "Predictive: p=0.23/0.30 top=kick 0.71"
+        for name, args in fake_cv2.calls
+    )
+
+
 def test_draw_trigger_flash_renders_centered_red_block_with_sound_name() -> None:
     frame = FakeFrame(120, 160)
     fake_cv2 = FakeCV2()

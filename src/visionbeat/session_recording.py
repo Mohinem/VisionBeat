@@ -13,8 +13,8 @@ import numpy as np
 
 from visionbeat.camera import CameraFrame
 from visionbeat.features import (
-    CanonicalFeatureSchema,
     CanonicalFeatureExtractor,
+    CanonicalFeatureSchema,
     assert_feature_schemas_match,
     get_canonical_feature_schema,
 )
@@ -37,6 +37,7 @@ class SessionRecorder:
     _tracker_stream: TextIO | None = field(init=False, default=None)
     _feature_stream: TextIO | None = field(init=False, default=None)
     _trigger_stream: TextIO = field(init=False)
+    _predictive_shadow_stream: TextIO | None = field(init=False, default=None)
     _feature_extractor: CanonicalFeatureExtractor = field(init=False)
     _feature_schema: CanonicalFeatureSchema = field(init=False)
     _started_at: str = field(init=False)
@@ -45,6 +46,7 @@ class SessionRecorder:
     _tracker_output_count: int = field(init=False, default=0)
     _feature_frame_count: int = field(init=False, default=0)
     _trigger_count: int = field(init=False, default=0)
+    _predictive_shadow_count: int = field(init=False, default=0)
     _closed: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
@@ -150,6 +152,15 @@ class SessionRecorder:
         self._write_jsonl(self._trigger_stream, event.to_dict())
         self._trigger_count += 1
 
+    def record_predictive_shadow_trigger(self, payload: Mapping[str, Any]) -> None:
+        """Persist one accepted predictive shadow trigger."""
+        if self._predictive_shadow_stream is None:
+            self._predictive_shadow_stream = (
+                self.session_dir / "predictive_shadow_triggers.jsonl"
+            ).open("a", encoding="utf-8")
+        self._write_jsonl(self._predictive_shadow_stream, payload)
+        self._predictive_shadow_count += 1
+
     def close(self) -> None:
         """Finalize the manifest and close any open session streams."""
         if self._closed:
@@ -163,6 +174,8 @@ class SessionRecorder:
         if self._feature_stream is not None:
             self._feature_stream.close()
         self._trigger_stream.close()
+        if self._predictive_shadow_stream is not None:
+            self._predictive_shadow_stream.close()
         self._closed = True
 
     def _create_session_dir(self) -> Path:
@@ -185,6 +198,8 @@ class SessionRecorder:
         if self.captures_tracker_outputs:
             artifacts["tracker_outputs"] = "tracker_outputs.jsonl"
             artifacts["feature_frames"] = "feature_frames.jsonl"
+        if self._predictive_shadow_stream is not None or self._predictive_shadow_count > 0:
+            artifacts["predictive_shadow_triggers"] = "predictive_shadow_triggers.jsonl"
         payload = {
             "schema": "visionbeat.session.v1",
             "session_id": self.session_dir.name,
@@ -201,6 +216,7 @@ class SessionRecorder:
                 "tracker_outputs": self._tracker_output_count,
                 "feature_frames": self._feature_frame_count,
                 "triggers": self._trigger_count,
+                "predictive_shadow_triggers": self._predictive_shadow_count,
             },
             "config": self.config_payload,
         }

@@ -72,6 +72,60 @@ def test_load_inference_dataset_accepts_future_completion_target(tmp_path: Path)
     assert dataset.horizon_frames == 4
 
 
+def test_load_inference_dataset_accepts_recent_completion_target(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "recent_windows.npz"
+    sample_count = 4
+    X = np.arange(sample_count * 32 * len(FEATURE_NAMES), dtype=np.float32).reshape(
+        sample_count,
+        32,
+        len(FEATURE_NAMES),
+    )
+    np.savez_compressed(
+        dataset_path,
+        X=X,
+        recording_ids=np.asarray(["recording-a"] * sample_count, dtype="<U128"),
+        window_end_frame_indices=np.arange(31, 31 + sample_count, dtype=np.int64),
+        window_end_timestamps_seconds=np.arange(sample_count, dtype=np.float32) / 30.0,
+        feature_names=np.asarray(FEATURE_NAMES, dtype="<U64"),
+        schema_version=np.asarray(FEATURE_SCHEMA_VERSION, dtype="<U64"),
+        target_name=np.asarray("completion_within_last_k_frames", dtype="<U64"),
+        horizon_frames=np.asarray(3, dtype=np.int64),
+        stride=np.asarray(1, dtype=np.int64),
+    )
+
+    dataset = load_inference_dataset(dataset_path)
+
+    assert dataset.target_name == "completion_within_last_k_frames"
+    assert dataset.horizon_frames == 3
+
+
+def test_load_inference_dataset_accepts_arm_target(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "arm_windows.npz"
+    sample_count = 4
+    X = np.arange(sample_count * 32 * len(FEATURE_NAMES), dtype=np.float32).reshape(
+        sample_count,
+        32,
+        len(FEATURE_NAMES),
+    )
+    np.savez_compressed(
+        dataset_path,
+        X=X,
+        recording_ids=np.asarray(["recording-a"] * sample_count, dtype="<U128"),
+        window_end_frame_indices=np.arange(31, 31 + sample_count, dtype=np.int64),
+        window_end_timestamps_seconds=np.arange(sample_count, dtype=np.float32) / 30.0,
+        feature_names=np.asarray(FEATURE_NAMES, dtype="<U64"),
+        schema_version=np.asarray(FEATURE_SCHEMA_VERSION, dtype="<U64"),
+        target_name=np.asarray("arm_within_next_k_frames", dtype="<U64"),
+        horizon_frames=np.asarray(3, dtype=np.int64),
+        stride=np.asarray(1, dtype=np.int64),
+    )
+
+    dataset = load_inference_dataset(dataset_path)
+
+    assert dataset.target_name == "arm_within_next_k_frames"
+    assert dataset.horizon_frames == 3
+
+
 def test_infer_hidden_channels_from_state_dict_uses_saved_shapes() -> None:
     state_dict = {
         "features.0.weight": np.zeros((64, len(FEATURE_NAMES), 3), dtype=np.float32),

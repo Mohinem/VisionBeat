@@ -149,6 +149,124 @@ visionbeat --config configs/default.yaml --skeleton-only-hud
 
 Press `q` or `Esc` to exit.
 
+## Live trigger modes
+
+VisionBeat now supports four live trigger modes for the predictive CNN stack:
+
+- `disabled` — heuristics only.
+- `shadow` — heuristics drive audio while the CNN + decoder runs passively for logs and comparison.
+- `primary` — the CNN + decoder drives live audio.
+- `hybrid` — the CNN arms the gesture early, then a matching completion event releases audio.
+
+You can select the mode from config or override it from the CLI.
+
+### Heuristic live mode
+
+```bash
+visionbeat --config configs/default.yaml
+```
+
+### Predictive shadow mode
+
+```bash
+visionbeat \
+  --config configs/default.yaml \
+  --predictive-mode shadow \
+  --timing-checkpoint path/to/timing.pt \
+  --gesture-checkpoint path/to/gesture.pt
+```
+
+### Predictive primary mode
+
+```bash
+visionbeat \
+  --config configs/default.yaml \
+  --predictive-mode primary \
+  --timing-checkpoint path/to/timing.pt \
+  --gesture-checkpoint path/to/gesture.pt
+```
+
+`primary` is target-aware:
+
+- `completion_within_next_k_frames` checkpoints use the live predictive peak decoder.
+- `completion_frame_binary` checkpoints use a simple learned threshold-crossing completion decoder.
+- `completion_within_last_k_frames` checkpoints use a local-peak run decoder aligned with the offline trigger analysis.
+
+If you want `primary` to trigger at gesture completion instead of "a hit is coming soon," train a
+`completion_frame_binary` or `completion_within_last_k_frames` timing checkpoint and use that at runtime.
+
+### Predictive hybrid mode
+
+```bash
+visionbeat \
+  --config configs/default.yaml \
+  --predictive-mode hybrid \
+  --timing-checkpoint path/to/timing.pt \
+  --gesture-checkpoint path/to/gesture.pt
+```
+
+Useful predictive overrides:
+
+- `--predictive-threshold`
+- `--predictive-trigger-cooldown-frames`
+- `--predictive-trigger-max-gap-frames`
+- `--predictive-device {auto,cpu,cuda}`
+
+### Training A Learned-Completion Primary Stack
+
+The cleanest path for `primary` is:
+
+1. prepare training archives with `--target completion_within_last_k_frames` or `--target completion_frame_binary`,
+2. train the timing CNN on those archives,
+3. train the kick/snare classifier on the same archives,
+4. run `visionbeat --predictive-mode primary` with those two checkpoints.
+
+Prepare one archive per labeled recording:
+
+```bash
+./.venv/bin/python -m visionbeat.prepare_training_data \
+  --video path/to/recording_1.mp4 \
+  --labels path/to/recording_1_labels.csv \
+  --config configs/default.yaml \
+  --window-size 24 \
+  --stride 1 \
+  --target completion_within_last_k_frames \
+  --horizon-frames 3 \
+  --out data/recording_1_completion_w24.npz
+```
+
+Train the timing model:
+
+```bash
+./.venv/bin/python -m visionbeat.train_cnn \
+  data/recording_1_completion_w24.npz \
+  data/recording_2_completion_w24.npz \
+  data/recording_3_completion_w24.npz \
+  --holdout-recording-id "VisionBeat Dataset - Recording 3" \
+  --output-dir outputs/completion_w24_r1r2_train_r3_val
+```
+
+Train the gesture classifier on the same completion-aligned archives:
+
+```bash
+./.venv/bin/python -m visionbeat.train_gesture_classifier \
+  data/recording_1_completion_w24.npz \
+  data/recording_2_completion_w24.npz \
+  data/recording_3_completion_w24.npz \
+  --holdout-recording-id "VisionBeat Dataset - Recording 3" \
+  --output-dir outputs/gesture_classifier_completion_w24_r1r2_train_r3_val
+```
+
+Run the learned-completion `primary` stack live:
+
+```bash
+visionbeat \
+  --config configs/default.yaml \
+  --predictive-mode primary \
+  --timing-checkpoint outputs/completion_w24_r1r2_train_r3_val/visionbeat_cnn_run_001/checkpoints/best_model.pt \
+  --gesture-checkpoint outputs/gesture_classifier_completion_w24_r1r2_train_r3_val/visionbeat_gesture_classifier_run_001/checkpoints/best_model.pt
+```
+
 ## Pose backends
 
 VisionBeat now routes body tracking through a backend abstraction. The current options are:

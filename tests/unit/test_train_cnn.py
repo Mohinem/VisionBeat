@@ -8,6 +8,8 @@ from visionbeat.features import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
 from visionbeat.train_cnn import (
     _binary_classification_metrics,
     _choose_binary_loss_mitigation,
+    _plan_binary_loss_mitigation,
+    _resolve_checkpoint_selection_score,
     _curate_training_negatives,
     _prepare_run_directory,
     _summarize_binary_targets,
@@ -131,6 +133,72 @@ def test_binary_label_summary_and_loss_mitigation() -> None:
     assert pos_weight == 1.0
 
 
+def test_plan_binary_loss_mitigation_supports_majority_downsample_upweight() -> None:
+    raw_train_stats = _summarize_binary_targets(
+        np.asarray([0] * 12 + [1] * 3, dtype=np.int64)
+    )
+    curated_train_stats = _summarize_binary_targets(
+        np.asarray([0] * 4 + [1] * 3, dtype=np.int64)
+    )
+
+    plan = _plan_binary_loss_mitigation(
+        strategy="majority_downsample_upweight",
+        raw_train_stats=raw_train_stats,
+        curated_train_stats=curated_train_stats,
+    )
+
+    assert plan.strategy == "majority_downsample_upweight"
+    assert plan.positive_weight == 1.0
+    assert plan.negative_weight == 3.0
+    assert plan.majority_downsample_factor == 3.0
+
+
+def test_plan_binary_loss_mitigation_keeps_existing_positive_weight_path() -> None:
+    raw_train_stats = _summarize_binary_targets(
+        np.asarray([0] * 12 + [1] * 3, dtype=np.int64)
+    )
+    curated_train_stats = _summarize_binary_targets(
+        np.asarray([0] * 4 + [1], dtype=np.int64)
+    )
+
+    plan = _plan_binary_loss_mitigation(
+        strategy="positive_pos_weight",
+        raw_train_stats=raw_train_stats,
+        curated_train_stats=curated_train_stats,
+    )
+
+    assert plan.strategy == "bce_with_logits_pos_weight"
+    assert plan.positive_weight == 4.0
+    assert plan.negative_weight == 1.0
+    assert plan.majority_downsample_factor == 3.0
+
+
+def test_checkpoint_selection_score_prefers_higher_f1_and_lower_loss() -> None:
+    metrics = {
+        "f1": 0.25,
+        "precision": 0.5,
+        "recall": 0.1667,
+        "roc_auc": 0.75,
+    }
+
+    assert _resolve_checkpoint_selection_score(
+        selection_metric="f1",
+        val_loss=0.9,
+        metrics=metrics,
+    ) == 0.25
+    assert _resolve_checkpoint_selection_score(
+        selection_metric="loss",
+        val_loss=0.9,
+        metrics=metrics,
+    ) == -0.9
+    assert _resolve_checkpoint_selection_score(
+        selection_metric="decoded_trigger_f1",
+        val_loss=0.9,
+        metrics=metrics,
+        decoded_trigger_metrics={"f1": 0.4, "precision": 0.5, "recall": 0.3333},
+    ) == 0.4
+
+
 def test_binary_classification_metrics_include_confusion_and_roc_auc() -> None:
     metrics = _binary_classification_metrics(
         np.asarray([0, 0, 1, 1], dtype=np.int64),
@@ -168,6 +236,42 @@ def test_load_archive_accepts_future_completion_targets(tmp_path: Path) -> None:
 
     assert archive.target_name == "completion_within_next_k_frames"
     assert archive.horizon_frames == 4
+
+
+def test_load_archive_accepts_recent_completion_targets(tmp_path: Path) -> None:
+    archive_path = tmp_path / "recent_target.npz"
+    _write_archive(
+        archive_path,
+        recording_id="recording-1",
+        frame_start=31,
+        sample_count=12,
+        positive_positions=(4, 5),
+        target_name="completion_within_last_k_frames",
+        horizon_frames=3,
+    )
+
+    archive = load_archive(archive_path)
+
+    assert archive.target_name == "completion_within_last_k_frames"
+    assert archive.horizon_frames == 3
+
+
+def test_load_archive_accepts_arm_targets(tmp_path: Path) -> None:
+    archive_path = tmp_path / "arm_target.npz"
+    _write_archive(
+        archive_path,
+        recording_id="recording-1",
+        frame_start=31,
+        sample_count=12,
+        positive_positions=(4, 5),
+        target_name="arm_within_next_k_frames",
+        horizon_frames=3,
+    )
+
+    archive = load_archive(archive_path)
+
+    assert archive.target_name == "arm_within_next_k_frames"
+    assert archive.horizon_frames == 3
 
 
 def test_curate_training_negatives_keeps_hard_negatives_and_downsamples_easy_ones(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -282,6 +283,57 @@ class ObservabilityRecorder:
     def log_cooldown_suppression(self, event: GestureObservationEvent) -> None:
         """Record a trigger suppressed by cooldown."""
         self._emit_event(logging.INFO, "cooldown_suppression", event)
+
+    def log_predictive_shadow_trigger(
+        self,
+        *,
+        timestamp: float,
+        frame_index: int,
+        timing_probability: float,
+        predicted_gesture: GestureType,
+        predicted_gesture_confidence: float,
+        heuristic_gesture_types: tuple[str, ...],
+        class_probabilities: Mapping[str, float],
+    ) -> None:
+        """Record one accepted predictive shadow trigger in structured logs."""
+        self._emit_lifecycle(
+            logging.INFO,
+            "predictive_shadow_trigger",
+            message="Predictive shadow trigger",
+            timestamp=timestamp,
+            frame_index=frame_index,
+            timing_probability=timing_probability,
+            predicted_gesture=predicted_gesture.value,
+            predicted_gesture_confidence=predicted_gesture_confidence,
+            heuristic_triggered_on_peak_frame=bool(heuristic_gesture_types),
+            heuristic_gesture_types_on_peak_frame=list(heuristic_gesture_types),
+            class_probabilities=dict(class_probabilities),
+        )
+
+    def log_predictive_live_trigger(
+        self,
+        *,
+        timestamp: float,
+        frame_index: int,
+        timing_probability: float,
+        predicted_gesture: GestureType,
+        predicted_gesture_confidence: float,
+        hand: str,
+        class_probabilities: Mapping[str, float],
+    ) -> None:
+        """Record one predictive trigger that drove the live instrument."""
+        self._emit_lifecycle(
+            logging.INFO,
+            "predictive_live_trigger",
+            message="Predictive live trigger",
+            timestamp=timestamp,
+            frame_index=frame_index,
+            timing_probability=timing_probability,
+            predicted_gesture=predicted_gesture.value,
+            predicted_gesture_confidence=predicted_gesture_confidence,
+            hand=hand,
+            class_probabilities=dict(class_probabilities),
+        )
 
     def close(self) -> None:
         """Flush and close any optional event sink."""

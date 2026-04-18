@@ -77,3 +77,26 @@ def test_validate_runtime_compatibility_rejects_future_target_horizon_mismatch()
             target_name="completion_within_next_k_frames",
             horizon_frames=2,
         )
+
+
+def test_validate_runtime_compatibility_rejects_recent_target_horizon_mismatch() -> None:
+    spec = VisionBeatCnnSpec(
+        feature_count=len(FEATURE_NAMES),
+        window_size=32,
+        hidden_channels=64,
+        dropout=0.2,
+        schema_version=FEATURE_SCHEMA_VERSION,
+        feature_names=FEATURE_NAMES,
+        target_name="completion_within_last_k_frames",
+        horizon_frames=3,
+    )
+
+    with pytest.raises(ValueError, match="horizon_frames"):
+        validate_runtime_compatibility(
+            spec,
+            feature_names=FEATURE_NAMES,
+            schema_version=FEATURE_SCHEMA_VERSION,
+            window_size=32,
+            target_name="completion_within_last_k_frames",
+            horizon_frames=2,
+        )

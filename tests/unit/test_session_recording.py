@@ -112,6 +112,40 @@ def test_session_recorder_writes_tracker_outputs_and_triggers(tmp_path: Path) ->
     assert trigger_rows == [event.to_dict()]
 
 
+def test_session_recorder_writes_predictive_shadow_triggers(tmp_path: Path) -> None:
+    recorder = SessionRecorder(
+        tmp_path,
+        mode="tracker_outputs",
+        config_payload={"predictive": {"enabled": True}},
+    )
+
+    recorder.record_predictive_shadow_trigger(
+        {
+            "frame_index": 12,
+            "timestamp": {"seconds": 2.5},
+            "timing_probability": 0.77,
+            "gesture": "kick",
+            "gesture_confidence": 0.91,
+            "heuristic_triggered_on_peak_frame": False,
+        }
+    )
+    recorder.close()
+
+    session_dir = recorder.session_dir
+    manifest = json.loads((session_dir / "manifest.json").read_text(encoding="utf-8"))
+    shadow_rows = [
+        json.loads(line)
+        for line in (
+            session_dir / "predictive_shadow_triggers.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert manifest["artifacts"]["predictive_shadow_triggers"] == "predictive_shadow_triggers.jsonl"
+    assert manifest["counts"]["predictive_shadow_triggers"] == 1
+    assert shadow_rows[0]["gesture"] == "kick"
+    assert shadow_rows[0]["frame_index"] == 12
+
+
 def test_session_recorder_writes_lossless_raw_frames_for_replay(tmp_path: Path) -> None:
     recorder = SessionRecorder(
         tmp_path,

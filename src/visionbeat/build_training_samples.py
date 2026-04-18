@@ -23,12 +23,27 @@ from visionbeat.features import (
 )
 from visionbeat.logging_config import configure_logging
 
-TrainingTarget = Literal["completion_frame_binary", "completion_within_next_k_frames"]
+TrainingTarget = Literal[
+    "completion_frame_binary",
+    "completion_within_next_k_frames",
+    "completion_within_last_k_frames",
+    "arm_frame_binary",
+    "arm_within_next_k_frames",
+    "arm_within_last_k_frames",
+]
 
 DEFAULT_WINDOW_SIZE: Final[int] = 32
 DEFAULT_STRIDE: Final[int] = 1
 DEFAULT_TARGET: Final[TrainingTarget] = "completion_frame_binary"
 DEFAULT_HORIZON_FRAMES: Final[int] = 4
+SUPPORTED_TRAINING_TARGETS: Final[tuple[TrainingTarget, ...]] = (
+    "completion_frame_binary",
+    "completion_within_next_k_frames",
+    "completion_within_last_k_frames",
+    "arm_frame_binary",
+    "arm_within_next_k_frames",
+    "arm_within_last_k_frames",
+)
 _REQUIRED_FRAME_TABLE_COLUMNS: Final[tuple[str, ...]] = (
     "recording_id",
     "frame_index",
@@ -36,6 +51,7 @@ _REQUIRED_FRAME_TABLE_COLUMNS: Final[tuple[str, ...]] = (
 )
 _GESTURE_LABEL_COLUMNS: Final[tuple[str, ...]] = ("gesture_label", "gesture")
 _IS_COMPLETION_COLUMNS: Final[tuple[str, ...]] = ("is_completion_frame", "is_completion")
+_IS_ARM_COLUMNS: Final[tuple[str, ...]] = ("is_arm_frame",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +63,7 @@ class FrameFeatureRow:
     timestamp_seconds: float
     gesture_label: str
     is_completion_frame: bool
+    is_arm_frame: bool
     vector: tuple[float, ...]
 
 
@@ -134,7 +151,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--target",
-        choices=("completion_frame_binary", "completion_within_next_k_frames"),
+        choices=SUPPORTED_TRAINING_TARGETS,
         default=DEFAULT_TARGET,
         help="Prediction target to generate for each sample window.",
     )
@@ -143,7 +160,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_HORIZON_FRAMES,
         help=(
-            "Future-frame horizon for `completion_within_next_k_frames`. "
+            "Tolerance in frames for `completion_within_next_k_frames` and "
+            "`completion_within_last_k_frames`. "
             f"Default: {DEFAULT_HORIZON_FRAMES}."
         ),
     )
@@ -180,6 +198,10 @@ def load_frame_feature_rows(
             csv_path=csv_path,
             column_role="completion flag",
         )
+        is_arm_column = _resolve_optional_column(
+            fieldnames,
+            candidates=_IS_ARM_COLUMNS,
+        )
         feature_columns = tuple(name for name in fieldnames if name in FEATURE_NAMES)
         if feature_columns != FEATURE_NAMES:
             raise FeatureSchemaError(
@@ -193,6 +215,9 @@ def load_frame_feature_rows(
                 timestamp_seconds=float(row["timestamp_seconds"]),
                 gesture_label=row[gesture_column].strip(),
                 is_completion_frame=_parse_bool(row[is_completion_column]),
+                is_arm_frame=(
+                    _parse_bool(row[is_arm_column]) if is_arm_column is not None else False
+                ),
                 vector=tuple(float(row[name]) for name in FEATURE_NAMES),
             )
             for row in reader
@@ -418,8 +443,10 @@ def _validate_window_config(
         raise ValueError("window_size must be greater than zero.")
     if stride <= 0:
         raise ValueError("stride must be greater than zero.")
-    if target == "completion_within_next_k_frames" and horizon_frames <= 0:
-        raise ValueError("horizon_frames must be greater than zero for future targets.")
+    if _target_requires_horizon(target) and horizon_frames <= 0:
+        raise ValueError(
+            "horizon_frames must be greater than zero for tolerant frame-horizon targets."
+        )
 
 
 def _build_target(
@@ -430,16 +457,40 @@ def _build_target(
     horizon_frames: int,
 ) -> tuple[int, str]:
     window_end_row = recording_rows[window_end_position]
-    if target == "completion_frame_binary":
-        return int(window_end_row.is_completion_frame), window_end_row.gesture_label
+    if target.endswith("_frame_binary"):
+        return _row_target_value(window_end_row, target)
+
+    if target.endswith("_within_last_k_frames"):
+        recent_rows = recording_rows[
+            max(0, window_end_position - horizon_frames + 1) : window_end_position + 1
+        ]
+        for row in reversed(recent_rows):
+            if _row_matches_target(row, target):
+                return _row_target_value(row, target)
+        return 0, ""
 
     future_rows = recording_rows[
         window_end_position + 1 : window_end_position + 1 + horizon_frames
     ]
     for row in future_rows:
-        if row.is_completion_frame:
-            return 1, row.gesture_label
+        if _row_matches_target(row, target):
+            return _row_target_value(row, target)
     return 0, ""
+
+
+def _row_target_value(row: FrameFeatureRow, target: TrainingTarget) -> tuple[int, str]:
+    matches_target = _row_matches_target(row, target)
+    return int(matches_target), row.gesture_label if matches_target else ""
+
+
+def _row_matches_target(row: FrameFeatureRow, target: TrainingTarget) -> bool:
+    if target.startswith("completion_"):
+        return row.is_completion_frame
+    return row.is_arm_frame
+
+
+def _target_requires_horizon(target: TrainingTarget) -> bool:
+    return target.endswith("_within_next_k_frames") or target.endswith("_within_last_k_frames")
 
 
 def _parse_bool(value: str) -> bool:
@@ -465,6 +516,17 @@ def _resolve_required_column(
             f"Expected one of {candidates}."
         )
     return matches[0]
+
+
+def _resolve_optional_column(
+    fieldnames: tuple[str, ...],
+    *,
+    candidates: tuple[str, ...],
+) -> str | None:
+    for name in candidates:
+        if name in fieldnames:
+            return name
+    return None
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from typing import Any, Final
 
 import numpy as np
 
+from visionbeat.cnn_trigger import decode_trigger_events, evaluate_decoded_triggers
 from visionbeat.cnn_model import (
     VisionBeatCnnSpec,
     binary_classification_metrics as _binary_classification_metrics,
@@ -27,6 +28,10 @@ from visionbeat.features import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
 _SUPPORTED_TARGET_NAMES: Final[tuple[str, ...]] = (
     "completion_frame_binary",
     "completion_within_next_k_frames",
+    "completion_within_last_k_frames",
+    "arm_frame_binary",
+    "arm_within_next_k_frames",
+    "arm_within_last_k_frames",
 )
 _REQUIRED_ARCHIVE_KEYS: Final[tuple[str, ...]] = (
     "X",
@@ -165,6 +170,24 @@ class NegativeCurationResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class BinaryLossMitigationPlan:
+    """Resolved per-class loss weights for one training run."""
+
+    strategy: str
+    positive_weight: float
+    negative_weight: float
+    majority_downsample_factor: float | None
+
+    def as_dict(self) -> dict[str, float | str | None]:
+        return {
+            "strategy": self.strategy,
+            "positive_weight": self.positive_weight,
+            "negative_weight": self.negative_weight,
+            "majority_downsample_factor": self.majority_downsample_factor,
+        }
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for CNN training."""
 
@@ -273,6 +296,64 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--imbalance-strategy",
+        default="positive_pos_weight",
+        choices=("positive_pos_weight", "majority_downsample_upweight"),
+        help=(
+            "How to compensate for class imbalance during training. "
+            "`positive_pos_weight` keeps the existing positive-class BCE weighting. "
+            "`majority_downsample_upweight` follows the downsample-majority and "
+            "upweight-kept-majority recipe."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-selection-metric",
+        default="f1",
+        choices=(
+            "loss",
+            "f1",
+            "precision",
+            "recall",
+            "roc_auc",
+            "decoded_trigger_f1",
+            "decoded_trigger_precision",
+            "decoded_trigger_recall",
+        ),
+        help=(
+            "Metric used to choose the saved best checkpoint. "
+            "`loss` minimizes validation loss; all other options maximize the named "
+            "validation metric. Decoded-trigger metrics evaluate event quality on the "
+            "validation split after local-peak decoding. Default: f1."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-selection-trigger-cooldown-frames",
+        type=int,
+        default=-1,
+        help=(
+            "Cooldown in frames for validation decoded-trigger checkpoint selection. "
+            "Defaults to half the dataset window size."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-selection-trigger-max-gap-frames",
+        type=int,
+        default=-1,
+        help=(
+            "Maximum gap in frames used to merge nearby positive windows when "
+            "computing validation decoded-trigger metrics. Defaults to dataset stride."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-selection-trigger-match-tolerance-frames",
+        type=int,
+        default=0,
+        help=(
+            "Extra frame tolerance when matching decoded validation triggers to labeled "
+            "positive neighborhoods. Default: 0."
+        ),
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=7,
@@ -322,6 +403,17 @@ def main(argv: list[str] | None = None) -> None:
             num_workers=args.num_workers,
             max_negative_positive_ratio=args.max_train_negative_positive_ratio,
             hard_negative_margin_frames=args.hard_negative_margin_frames,
+            imbalance_strategy=args.imbalance_strategy,
+            checkpoint_selection_metric=args.checkpoint_selection_metric,
+            checkpoint_selection_trigger_cooldown_frames=(
+                args.checkpoint_selection_trigger_cooldown_frames
+            ),
+            checkpoint_selection_trigger_max_gap_frames=(
+                args.checkpoint_selection_trigger_max_gap_frames
+            ),
+            checkpoint_selection_trigger_match_tolerance_frames=(
+                args.checkpoint_selection_trigger_match_tolerance_frames
+            ),
             config=_build_run_config(args=args, dataset=dataset, split=split, output_dir=run_dir),
         )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
@@ -333,7 +425,11 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Config: {result['config_path']}")
     print(f"Epoch metrics: {result['epoch_metrics_path']}")
     print(f"Evaluation report: {result['evaluation_report_path']}")
-    print(f"Best validation loss: {result['best_val_loss']:.6f}")
+    print(
+        "Checkpoint selection: "
+        f"{result['checkpoint_selection_metric']}={result['checkpoint_selection_score']:.6f}"
+    )
+    print(f"Selected checkpoint validation loss: {result['best_val_loss']:.6f}")
 
 
 def _prepare_run_directory(base_path: Path) -> Path:
@@ -386,6 +482,17 @@ def _build_run_config(
             "hidden_channels": args.hidden_channels,
             "max_train_negative_positive_ratio": args.max_train_negative_positive_ratio,
             "hard_negative_margin_frames": args.hard_negative_margin_frames,
+            "imbalance_strategy": args.imbalance_strategy,
+            "checkpoint_selection_metric": args.checkpoint_selection_metric,
+            "checkpoint_selection_trigger_cooldown_frames": (
+                args.checkpoint_selection_trigger_cooldown_frames
+            ),
+            "checkpoint_selection_trigger_max_gap_frames": (
+                args.checkpoint_selection_trigger_max_gap_frames
+            ),
+            "checkpoint_selection_trigger_match_tolerance_frames": (
+                args.checkpoint_selection_trigger_match_tolerance_frames
+            ),
             "seed": args.seed,
             "device": args.device,
             "num_workers": args.num_workers,
@@ -824,6 +931,125 @@ def _choose_binary_loss_mitigation(stats: BinaryLabelStats) -> tuple[str, float]
     return "standard_bce_with_logits", 1.0
 
 
+def _plan_binary_loss_mitigation(
+    *,
+    strategy: str,
+    raw_train_stats: BinaryLabelStats,
+    curated_train_stats: BinaryLabelStats,
+) -> BinaryLossMitigationPlan:
+    """Resolve the train-time weighting plan after negative curation."""
+
+    if curated_train_stats.positive_count == 0:
+        raise ValueError("Training split contains no positive samples.")
+    if curated_train_stats.negative_count == 0:
+        raise ValueError("Training split contains no negative samples.")
+
+    majority_downsample_factor = None
+    if raw_train_stats.negative_count > 0:
+        majority_downsample_factor = (
+            raw_train_stats.negative_count / curated_train_stats.negative_count
+        )
+
+    if strategy == "positive_pos_weight":
+        resolved_strategy, positive_weight = _choose_binary_loss_mitigation(curated_train_stats)
+        return BinaryLossMitigationPlan(
+            strategy=resolved_strategy,
+            positive_weight=float(positive_weight),
+            negative_weight=1.0,
+            majority_downsample_factor=majority_downsample_factor,
+        )
+    if strategy == "majority_downsample_upweight":
+        return BinaryLossMitigationPlan(
+            strategy="majority_downsample_upweight",
+            positive_weight=1.0,
+            negative_weight=(
+                1.0 if majority_downsample_factor is None else float(majority_downsample_factor)
+            ),
+            majority_downsample_factor=majority_downsample_factor,
+        )
+    raise ValueError(f"Unsupported imbalance strategy {strategy!r}.")
+
+
+def _resolve_checkpoint_selection_score(
+    *,
+    selection_metric: str,
+    val_loss: float,
+    metrics: dict[str, int | float | None],
+    decoded_trigger_metrics: dict[str, int | float] | None = None,
+) -> float:
+    """Return the scalar score used to rank checkpoints for persistence."""
+
+    if selection_metric == "loss":
+        return -float(val_loss)
+    if selection_metric == "decoded_trigger_f1":
+        return float(decoded_trigger_metrics["f1"]) if decoded_trigger_metrics is not None else float(
+            "-inf"
+        )
+    if selection_metric == "decoded_trigger_precision":
+        return (
+            float(decoded_trigger_metrics["precision"])
+            if decoded_trigger_metrics is not None
+            else float("-inf")
+        )
+    if selection_metric == "decoded_trigger_recall":
+        return (
+            float(decoded_trigger_metrics["recall"])
+            if decoded_trigger_metrics is not None
+            else float("-inf")
+        )
+    if selection_metric not in {"f1", "precision", "recall", "roc_auc"}:
+        raise ValueError(f"Unsupported checkpoint_selection_metric {selection_metric!r}.")
+    value = metrics.get(selection_metric)
+    if value is None:
+        return float("-inf")
+    return float(value)
+
+
+def _format_checkpoint_selection_value(*, selection_metric: str, value: float) -> str:
+    """Render the active checkpoint-selection score for logging."""
+
+    if selection_metric == "loss":
+        return f"val_loss={-value:.6f}"
+    if selection_metric.startswith("decoded_trigger_"):
+        return f"{selection_metric}={value:.4f}"
+    return f"val_{selection_metric}={value:.4f}"
+
+
+def _resolve_decoded_trigger_config(
+    *,
+    window_size: int,
+    stride: int,
+    cooldown_frames: int,
+    max_gap_frames: int,
+    match_tolerance_frames: int,
+) -> dict[str, int]:
+    """Resolve validation decoded-trigger settings using predict-time defaults."""
+
+    if cooldown_frames < -1:
+        raise ValueError("checkpoint_selection_trigger_cooldown_frames must be -1 or greater.")
+    if max_gap_frames < -1:
+        raise ValueError("checkpoint_selection_trigger_max_gap_frames must be -1 or greater.")
+    if match_tolerance_frames < 0:
+        raise ValueError(
+            "checkpoint_selection_trigger_match_tolerance_frames must be greater than or equal to zero."
+        )
+    return {
+        "cooldown_frames": max(window_size // 2, 0) if cooldown_frames < 0 else cooldown_frames,
+        "max_gap_frames": max(stride, 1) if max_gap_frames < 0 else max_gap_frames,
+        "match_tolerance_frames": match_tolerance_frames,
+    }
+
+
+def _prefixed_decoded_trigger_metrics(
+    decoded_trigger_metrics: dict[str, int | float],
+) -> dict[str, int | float]:
+    """Namespace decoded-trigger metrics for training history logs."""
+
+    return {
+        f"decoded_trigger_{key}": value for key, value in decoded_trigger_metrics.items()
+    }
+
+
 def _format_binary_label_stats(name: str, stats: BinaryLabelStats) -> str:
     """Format one class-distribution line for stdout logging."""
 
@@ -848,6 +1074,20 @@ def _describe_positive_class_meaning(*, target_name: str, horizon_frames: int) -
         return "gesture completion occurs at the last frame of the window"
     if target_name == "completion_within_next_k_frames":
         return f"gesture completion occurs within the next {horizon_frames} frame(s) after the window"
+    if target_name == "completion_within_last_k_frames":
+        return (
+            "gesture completion occurred within the last "
+            f"{horizon_frames} frame(s) ending at the window"
+        )
+    if target_name == "arm_frame_binary":
+        return "early-arm timing is active at the last frame of the window"
+    if target_name == "arm_within_next_k_frames":
+        return f"early-arm timing becomes active within the next {horizon_frames} frame(s) after the window"
+    if target_name == "arm_within_last_k_frames":
+        return (
+            "early-arm timing became active within the last "
+            f"{horizon_frames} frame(s) ending at the window"
+        )
     raise ValueError(f"Unsupported target_name {target_name!r}.")
 
 
@@ -860,6 +1100,23 @@ def _describe_negative_class_meaning(*, target_name: str, horizon_frames: int) -
         return (
             "no gesture completion occurs within the next "
             f"{horizon_frames} frame(s) after the window"
+        )
+    if target_name == "completion_within_last_k_frames":
+        return (
+            "no gesture completion occurred within the last "
+            f"{horizon_frames} frame(s) ending at the window"
+        )
+    if target_name == "arm_frame_binary":
+        return "early-arm timing is not active at the last frame of the window"
+    if target_name == "arm_within_next_k_frames":
+        return (
+            "early-arm timing does not become active within the next "
+            f"{horizon_frames} frame(s) after the window"
+        )
+    if target_name == "arm_within_last_k_frames":
+        return (
+            "early-arm timing did not become active within the last "
+            f"{horizon_frames} frame(s) ending at the window"
         )
     raise ValueError(f"Unsupported target_name {target_name!r}.")
 
@@ -980,6 +1237,11 @@ def train_model(
     num_workers: int,
     max_negative_positive_ratio: float,
     hard_negative_margin_frames: int,
+    imbalance_strategy: str,
+    checkpoint_selection_metric: str,
+    checkpoint_selection_trigger_cooldown_frames: int,
+    checkpoint_selection_trigger_max_gap_frames: int,
+    checkpoint_selection_trigger_match_tolerance_frames: int,
     config: dict[str, Any],
 ) -> dict[str, Any]:
     """Train the baseline CNN and save the best checkpoint."""
@@ -1047,6 +1309,13 @@ def train_model(
     train_y = torch.from_numpy(dataset.y[curated_train_indices]).float()
     val_X = torch.from_numpy(dataset.X[split.validation_indices]).float()
     val_y = torch.from_numpy(dataset.y[split.validation_indices]).float()
+    validation_recording_ids = dataset.recording_ids[split.validation_indices]
+    validation_window_end_frame_indices = dataset.window_end_frame_indices[
+        split.validation_indices
+    ]
+    validation_window_end_timestamps_seconds = dataset.window_end_timestamps_seconds[
+        split.validation_indices
+    ]
 
     if train_stats.positive_count == 0:
         raise ValueError("Training split contains no positive samples.")
@@ -1075,6 +1344,20 @@ def train_model(
             f"dropped easy_neg={curation.dropped_easy_negative_count}."
         )
     print(f"Target meaning: positive={positive_class_meaning}")
+
+    decoded_trigger_config = _resolve_decoded_trigger_config(
+        window_size=dataset.window_size,
+        stride=dataset.stride,
+        cooldown_frames=checkpoint_selection_trigger_cooldown_frames,
+        max_gap_frames=checkpoint_selection_trigger_max_gap_frames,
+        match_tolerance_frames=checkpoint_selection_trigger_match_tolerance_frames,
+    )
+    print(
+        "Validation decoded-trigger config: "
+        f"cooldown_frames={decoded_trigger_config['cooldown_frames']} "
+        f"max_gap_frames={decoded_trigger_config['max_gap_frames']} "
+        f"match_tolerance_frames={decoded_trigger_config['match_tolerance_frames']}"
+    )
 
     train_dataset = TensorDataset(train_X, train_y)
     val_dataset = TensorDataset(val_X, val_y)
@@ -1107,19 +1390,26 @@ def train_model(
     model = build_completion_cnn(nn, model_spec)
     model.to(resolved_device)
 
-    imbalance_strategy, pos_weight_value = _choose_binary_loss_mitigation(train_stats)
-    if imbalance_strategy == "bce_with_logits_pos_weight":
-        # Weighted loss is safer than oversampling here because the dataset uses
-        # stride-1 overlapping windows, so repeated positives would be near duplicates.
-        pos_weight = torch.tensor([pos_weight_value], device=resolved_device, dtype=torch.float32)
-        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    loss_plan = _plan_binary_loss_mitigation(
+        strategy=imbalance_strategy,
+        raw_train_stats=raw_train_stats,
+        curated_train_stats=train_stats,
+    )
+    train_criterion = nn.BCEWithLogitsLoss(reduction="none")
+    val_criterion = nn.BCEWithLogitsLoss(reduction="none")
+    if loss_plan.strategy == "bce_with_logits_pos_weight":
         print(
             "Imbalance mitigation: BCEWithLogitsLoss with "
-            f"pos_weight={pos_weight_value:.4f} "
+            f"positive_weight={loss_plan.positive_weight:.4f} "
             "(training negative/positive ratio)."
         )
+    elif loss_plan.strategy == "majority_downsample_upweight":
+        print(
+            "Imbalance mitigation: majority downsample plus majority upweight "
+            f"(negative_weight={loss_plan.negative_weight:.4f}, "
+            f"effective_downsample_factor={loss_plan.negative_weight:.4f})."
+        )
     else:
-        criterion = nn.BCEWithLogitsLoss()
         print(
             "Imbalance mitigation: standard BCEWithLogitsLoss "
             "(training split is close to balanced)."
@@ -1132,24 +1422,47 @@ def train_model(
 
     history: list[dict[str, int | float | None]] = []
     best_val_loss = float("inf")
+    best_selection_score = float("-inf")
     best_epoch = 0
     best_metrics: dict[str, int | float | None] | None = None
+    best_decoded_trigger_metrics: dict[str, int | float] | None = None
     for epoch in range(1, epochs + 1):
         train_loss = _run_epoch(
             model=model,
             loader=train_loader,
-            criterion=criterion,
+            criterion=train_criterion,
             optimizer=optimizer,
             device=resolved_device,
             torch=torch,
             train=True,
+            positive_weight=loss_plan.positive_weight,
+            negative_weight=loss_plan.negative_weight,
         )
-        val_loss, metrics = _evaluate(
+        val_loss, metrics, y_score, y_true = _evaluate(
             model=model,
             loader=val_loader,
-            criterion=criterion,
+            criterion=val_criterion,
             device=resolved_device,
             torch=torch,
+            positive_weight=1.0,
+            negative_weight=1.0,
+        )
+        decoded_triggers = decode_trigger_events(
+            recording_ids=validation_recording_ids,
+            window_end_frame_indices=validation_window_end_frame_indices,
+            window_end_timestamps_seconds=validation_window_end_timestamps_seconds,
+            probabilities=y_score,
+            threshold=0.5,
+            cooldown_frames=decoded_trigger_config["cooldown_frames"],
+            max_gap_frames=decoded_trigger_config["max_gap_frames"],
+        )
+        decoded_trigger_metrics = evaluate_decoded_triggers(
+            decoded_triggers=decoded_triggers,
+            recording_ids=validation_recording_ids,
+            window_end_frame_indices=validation_window_end_frame_indices,
+            labels=y_true,
+            match_tolerance_frames=decoded_trigger_config["match_tolerance_frames"],
+            max_gap_frames=decoded_trigger_config["max_gap_frames"],
         )
         history.append(
             {
@@ -1157,6 +1470,7 @@ def train_model(
                 "train_loss": float(train_loss),
                 "val_loss": float(val_loss),
                 **metrics,
+                **_prefixed_decoded_trigger_metrics(decoded_trigger_metrics),
             }
         )
         print(
@@ -1179,11 +1493,29 @@ def train_model(
             f"false_positives={metrics['false_positive']} "
             f"false_negatives={metrics['false_negative']}"
         )
+        print(
+            "  "
+            f"decoded_trigger_precision={decoded_trigger_metrics['precision']:.4f} "
+            f"decoded_trigger_recall={decoded_trigger_metrics['recall']:.4f} "
+            f"decoded_trigger_f1={decoded_trigger_metrics['f1']:.4f} "
+            f"decoded_trigger_count={decoded_trigger_metrics['decoded_trigger_count']} "
+            f"decoded_false_triggers={decoded_trigger_metrics['false_positive_trigger_count']}"
+        )
+        selection_score = _resolve_checkpoint_selection_score(
+            selection_metric=checkpoint_selection_metric,
+            val_loss=val_loss,
+            metrics=metrics,
+            decoded_trigger_metrics=decoded_trigger_metrics,
+        )
 
-        if val_loss < best_val_loss:
+        if selection_score > best_selection_score or (
+            selection_score == best_selection_score and val_loss < best_val_loss
+        ):
+            best_selection_score = selection_score
             best_val_loss = val_loss
             best_epoch = epoch
             best_metrics = dict(metrics)
+            best_decoded_trigger_metrics = dict(decoded_trigger_metrics)
             checkpoint_payload = build_checkpoint_payload(
                 spec=model_spec,
                 model_state_dict=model.state_dict(),
@@ -1192,6 +1524,10 @@ def train_model(
                     "epoch": epoch,
                     "val_loss": val_loss,
                     "val_metrics": metrics,
+                    "val_decoded_trigger_metrics": decoded_trigger_metrics,
+                    "checkpoint_selection_metric": checkpoint_selection_metric,
+                    "checkpoint_selection_score": selection_score,
+                    "decoded_trigger_config": decoded_trigger_config,
                     "class_distribution": {
                         "combined": combined_stats.as_dict(),
                         "train_raw": raw_train_stats.as_dict(),
@@ -1199,25 +1535,22 @@ def train_model(
                         "validation": validation_stats.as_dict(),
                     },
                     "training_sample_curation": curation.as_dict(),
-                    "imbalance_strategy": imbalance_strategy,
-                    "loss_pos_weight": (
-                        pos_weight_value
-                        if imbalance_strategy == "bce_with_logits_pos_weight"
-                        else None
-                    ),
+                    "imbalance_strategy": loss_plan.strategy,
+                    "loss_weighting": loss_plan.as_dict(),
                     "positive_class_meaning": positive_class_meaning,
                     "negative_class_meaning": negative_class_meaning,
                 },
             )
             torch.save(checkpoint_payload, checkpoint_path)
 
-    if best_metrics is None:
+    if best_metrics is None or best_decoded_trigger_metrics is None:
         raise RuntimeError("Training finished without producing validation metrics.")
 
     print(
         "Best checkpoint metrics: "
         f"epoch={best_epoch:02d} "
-        f"val_loss={best_val_loss:.6f} "
+        f"{_format_checkpoint_selection_value(selection_metric=checkpoint_selection_metric, value=best_selection_score)} "
+        f"selected_val_loss={best_val_loss:.6f} "
         f"val_accuracy={best_metrics['accuracy']:.4f} "
         f"val_precision={best_metrics['precision']:.4f} "
         f"val_recall={best_metrics['recall']:.4f} "
@@ -1234,10 +1567,23 @@ def train_model(
         f"false_positives={best_metrics['false_positive']} "
         f"false_negatives={best_metrics['false_negative']}"
     )
+    print(
+        "  "
+        f"best_decoded_trigger_precision={best_decoded_trigger_metrics['precision']:.4f} "
+        f"best_decoded_trigger_recall={best_decoded_trigger_metrics['recall']:.4f} "
+        f"best_decoded_trigger_f1={best_decoded_trigger_metrics['f1']:.4f} "
+        f"best_decoded_trigger_count={best_decoded_trigger_metrics['decoded_trigger_count']} "
+        f"best_decoded_false_triggers={best_decoded_trigger_metrics['false_positive_trigger_count']}"
+    )
 
     evaluation_report = {
         "best_epoch": best_epoch,
         "best_val_loss": best_val_loss,
+        "checkpoint_selection_metric": checkpoint_selection_metric,
+        "checkpoint_selection_score": (
+            -best_selection_score if checkpoint_selection_metric == "loss" else best_selection_score
+        ),
+        "decoded_trigger_config": decoded_trigger_config,
         "best_val_metrics": {
             "accuracy": best_metrics["accuracy"],
             "precision": best_metrics["precision"],
@@ -1259,6 +1605,7 @@ def train_model(
                 "predicted_positive_rate": best_metrics["predicted_positive_rate"],
             },
         },
+        "best_decoded_trigger_metrics": dict(best_decoded_trigger_metrics),
         "validation_recording_id": split.validation_recording_id,
         "split_policy": split.policy,
         "target_name": dataset.target_name,
@@ -1319,7 +1666,12 @@ def train_model(
         },
         "training_sample_curation": curation.as_dict(),
         "checkpoint_model_metadata": model_spec.to_checkpoint_metadata(),
-        "imbalance_strategy": imbalance_strategy,
+        "imbalance_strategy": loss_plan.strategy,
+        "checkpoint_selection_metric": checkpoint_selection_metric,
+        "checkpoint_selection_score": (
+            -best_selection_score if checkpoint_selection_metric == "loss" else best_selection_score
+        ),
+        "decoded_trigger_config": decoded_trigger_config,
         "seed": seed,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -1327,14 +1679,17 @@ def train_model(
         "weight_decay": weight_decay,
         "dropout": dropout,
         "hidden_channels": hidden_channels,
+        "loss_weighting": loss_plan.as_dict(),
         "pos_weight": (
-            pos_weight_value if imbalance_strategy == "bce_with_logits_pos_weight" else None
+            loss_plan.positive_weight if loss_plan.strategy == "bce_with_logits_pos_weight" else None
         ),
         "history": history,
         "config_path": str(config_path),
         "best_checkpoint_path": str(checkpoint_path),
         "best_epoch": best_epoch,
         "best_val_metrics": best_metrics,
+        "best_decoded_trigger_metrics": best_decoded_trigger_metrics,
+        "selected_val_loss": best_val_loss,
         "epoch_metrics_path": str(epoch_metrics_path),
         "evaluation_report_path": str(evaluation_report_path),
         "best_confusion_matrix_path": str(best_confusion_matrix_path),
@@ -1349,6 +1704,10 @@ def train_model(
         "config_path": str(config_path),
         "best_checkpoint_path": str(checkpoint_path),
         "best_val_loss": best_val_loss,
+        "checkpoint_selection_metric": checkpoint_selection_metric,
+        "checkpoint_selection_score": (
+            -best_selection_score if checkpoint_selection_metric == "loss" else best_selection_score
+        ),
         "metadata_path": str(metadata_path),
         "epoch_metrics_path": str(epoch_metrics_path),
         "evaluation_report_path": str(evaluation_report_path),
@@ -1418,9 +1777,12 @@ def _validate_archive_shapes(
             f"Archive {path} has unsupported target_name {target_name!r}. "
             f"Expected one of {_SUPPORTED_TARGET_NAMES}."
         )
-    if target_name == "completion_within_next_k_frames" and horizon_frames <= 0:
+    if target_name in {
+        "completion_within_next_k_frames",
+        "completion_within_last_k_frames",
+    } and horizon_frames <= 0:
         raise ValueError(
-            f"Archive {path} has invalid horizon_frames {horizon_frames} for future targets."
+            f"Archive {path} has invalid horizon_frames {horizon_frames} for tolerant completion targets."
         )
     if stride <= 0:
         raise ValueError(f"Archive {path} has invalid stride {stride}.")
@@ -1454,6 +1816,8 @@ def _run_epoch(
     device: Any,
     torch: Any,
     train: bool,
+    positive_weight: float,
+    negative_weight: float,
 ) -> float:
     if train:
         model.train()
@@ -1468,7 +1832,14 @@ def _run_epoch(
             features = features.to(device)
             targets = targets.to(device)
             logits = model(features)
-            loss = criterion(logits, targets)
+            loss = _compute_weighted_binary_loss(
+                logits=logits,
+                targets=targets,
+                criterion=criterion,
+                positive_weight=positive_weight,
+                negative_weight=negative_weight,
+                torch=torch,
+            )
             if train:
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
@@ -1486,7 +1857,9 @@ def _evaluate(
     criterion: Any,
     device: Any,
     torch: Any,
-) -> tuple[float, dict[str, float]]:
+    positive_weight: float,
+    negative_weight: float,
+) -> tuple[float, dict[str, float], np.ndarray, np.ndarray]:
     model.eval()
     all_probabilities: list[np.ndarray] = []
     all_targets: list[np.ndarray] = []
@@ -1497,7 +1870,14 @@ def _evaluate(
             features = features.to(device)
             targets = targets.to(device)
             logits = model(features)
-            loss = criterion(logits, targets)
+            loss = _compute_weighted_binary_loss(
+                logits=logits,
+                targets=targets,
+                criterion=criterion,
+                positive_weight=positive_weight,
+                negative_weight=negative_weight,
+                torch=torch,
+            )
             probabilities = torch.sigmoid(logits)
             batch_size = int(features.shape[0])
             total_loss += float(loss.item()) * batch_size
@@ -1508,7 +1888,27 @@ def _evaluate(
     y_true = np.concatenate(all_targets, axis=0).astype(np.int64, copy=False)
     y_score = np.concatenate(all_probabilities, axis=0)
     metrics = _binary_classification_metrics(y_true, y_score)
-    return total_loss / max(total_examples, 1), metrics
+    return total_loss / max(total_examples, 1), metrics, y_score, y_true
+
+
+def _compute_weighted_binary_loss(
+    *,
+    logits: Any,
+    targets: Any,
+    criterion: Any,
+    positive_weight: float,
+    negative_weight: float,
+    torch: Any,
+):
+    """Apply optional per-class weights on top of unreduced BCE loss."""
+
+    losses = criterion(logits, targets)
+    if positive_weight == 1.0 and negative_weight == 1.0:
+        return losses.mean()
+    positive_weights = torch.full_like(targets, float(positive_weight))
+    negative_weights = torch.full_like(targets, float(negative_weight))
+    class_weights = torch.where(targets > 0.5, positive_weights, negative_weights)
+    return (losses * class_weights).mean()
 
 
 def _maybe_save_training_plots(

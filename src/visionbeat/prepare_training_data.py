@@ -13,6 +13,7 @@ from visionbeat.build_training_samples import (
     DEFAULT_STRIDE,
     DEFAULT_TARGET,
     DEFAULT_WINDOW_SIZE,
+    SUPPORTED_TRAINING_TARGETS,
     TrainingTarget,
     generate_training_samples,
 )
@@ -103,7 +104,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--target",
-        choices=("completion_frame_binary", "completion_within_next_k_frames"),
+        choices=SUPPORTED_TRAINING_TARGETS,
         default=DEFAULT_TARGET,
         help="Prediction target to generate for each sample window.",
     )
@@ -112,7 +113,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=DEFAULT_HORIZON_FRAMES,
         help=(
-            "Future-frame horizon for `completion_within_next_k_frames`. "
+            "Tolerance in frames for `completion_within_next_k_frames` and "
+            "`completion_within_last_k_frames`. "
             f"Default: {DEFAULT_HORIZON_FRAMES}."
         ),
     )

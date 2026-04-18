@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -7,6 +9,7 @@ from visionbeat.analyze_decoder_timing import (
     CompletionEvent,
     SpanCompletionMapping,
     _classify_timing,
+    load_completion_events,
     map_positive_spans_to_completion_events,
     match_triggers_to_completion_timings,
 )
@@ -112,3 +115,25 @@ def test_classify_timing_covers_all_relative_positions() -> None:
     assert _classify_timing(-1) == "before_completion"
     assert _classify_timing(0) == "at_completion"
     assert _classify_timing(1) == "after_completion"
+
+
+def test_load_completion_events_accepts_v2_completion_frame_column(tmp_path: Path) -> None:
+    labels_path = tmp_path / "labels_v2.csv"
+    labels_path.write_text(
+        "recording_id,event_id,gesture_label,arm_start_frame,completion_frame\n"
+        "session_01,evt-001,kick,10,12\n",
+        encoding="utf-8",
+    )
+
+    events = load_completion_events(
+        Path(labels_path),
+        default_recording_id="session_01",
+    )
+
+    assert events == (
+        CompletionEvent(
+            recording_id="session_01",
+            completion_frame_index=12,
+            gesture_label="kick",
+        ),
+    )

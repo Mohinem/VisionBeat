@@ -120,11 +120,26 @@ class OverlayRenderer:
 
 def _build_debug_labels(state: RenderState) -> list[str]:
     """Build human-readable overlay lines from render state."""
+    performance_labels: list[str] = []
+    if state.capture_fps is not None:
+        performance_labels.append(f"Capture {state.capture_fps:.1f}")
+    if state.inference_fps is not None:
+        performance_labels.append(f"Infer {state.inference_fps:.1f}")
+    if state.render_fps is not None:
+        performance_labels.append(f"Render {state.render_fps:.1f}")
+    if not performance_labels and state.fps is not None:
+        performance_labels.append(f"Loop {state.fps:.1f}")
+
     labels = [
         "VisionBeat • Research Demo HUD",
         f"Status: {state.pose.status}",
         f"Frame: {state.frame_index}",
-        f"FPS: {state.fps:.1f}" if state.fps is not None else "FPS: --",
+        f"Rates: {' | '.join(performance_labels)}" if performance_labels else "Rates: --",
+        (
+            f"Pipeline latency: {state.pipeline_latency_ms:.1f} ms"
+            if state.pipeline_latency_ms is not None
+            else "Pipeline latency: --"
+        ),
         (
             f"Detected motion: {state.current_candidate.label} "
             f"[{state.current_candidate.confidence:.2f}]"
@@ -146,6 +161,11 @@ def _build_debug_labels(state: RenderState) -> list[str]:
             f"Detector: {state.detector_status}"
             if state.detector_status is not None
             else "Detector: --"
+        ),
+        (
+            f"Predictive: {state.predictive_status}"
+            if state.predictive_status is not None
+            else "Predictive: --"
         ),
         (
             f"Audio: {state.audio_status}"

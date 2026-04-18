@@ -27,6 +27,25 @@ _MOVENET_MODEL_URL: Final[str] = (
     "tflite/float16/4?lite-format=tflite"
 )
 _MOVENET_MODEL_FILENAME: Final[str] = "movenet_singlepose_lightning_float16.tflite"
+_MOVENET_ALL_KEYPOINTS: Final[dict[str, int]] = {
+    "nose": 0,
+    "left_eye": 1,
+    "right_eye": 2,
+    "left_ear": 3,
+    "right_ear": 4,
+    "left_shoulder": 5,
+    "right_shoulder": 6,
+    "left_elbow": 7,
+    "right_elbow": 8,
+    "left_wrist": 9,
+    "right_wrist": 10,
+    "left_hip": 11,
+    "right_hip": 12,
+    "left_knee": 13,
+    "right_knee": 14,
+    "left_ankle": 15,
+    "right_ankle": 16,
+}
 _MOVENET_KEYPOINTS: Final[dict[str, int]] = {
     "nose": 0,
     "left_shoulder": 5,
@@ -49,6 +68,11 @@ class MoveNetPoseProvider(PoseProvider):
     _output_details: dict[str, Any] = field(init=False)
     _input_height: int = field(init=False)
     _input_width: int = field(init=False)
+    landmark_names: tuple[str, ...] = field(init=False, default=tuple(_MOVENET_KEYPOINTS))
+    all_landmark_names: tuple[str, ...] = field(
+        init=False,
+        default=tuple(_MOVENET_ALL_KEYPOINTS),
+    )
 
     @staticmethod
     def _load_interpreter_class(import_failures: list[str]) -> Any:
@@ -166,16 +190,14 @@ class MoveNetPoseProvider(PoseProvider):
             )
 
         frame_height, frame_width = rgb_frame.shape[:2]
-        landmarks: dict[str, LandmarkPoint] = {}
-        for name, index in _MOVENET_KEYPOINTS.items():
+        raw_landmarks: dict[str, LandmarkPoint] = {}
+        for name, index in _MOVENET_ALL_KEYPOINTS.items():
             score = float(keypoints[index, 2])
-            if score < self.config.min_tracking_confidence:
-                continue
             raw_y = float(keypoints[index, 0]) * self._input_height
             raw_x = float(keypoints[index, 1]) * self._input_width
             y = ((raw_y - pad_top) / scale) / frame_height
             x = ((raw_x - pad_left) / scale) / frame_width
-            landmarks[name] = LandmarkPoint(
+            raw_landmarks[name] = LandmarkPoint(
                 x=self._clamp_unit_interval(x),
                 y=self._clamp_unit_interval(y),
                 # MoveNet is 2D-only, so the shared z axis is left neutral.
@@ -183,10 +205,18 @@ class MoveNetPoseProvider(PoseProvider):
                 visibility=self._clamp_unit_interval(score),
             )
 
+        landmarks: dict[str, LandmarkPoint] = {}
+        for name in _MOVENET_KEYPOINTS:
+            landmark = raw_landmarks[name]
+            if landmark.visibility < self.config.min_tracking_confidence:
+                continue
+            landmarks[name] = landmark
+
         status = "tracking" if landmarks else "landmarks_below_confidence_threshold"
         return TrackerOutput(
             timestamp=frame_timestamp,
             landmarks=landmarks,
+            raw_landmarks=raw_landmarks,
             person_detected=True,
             status=status,
         )
