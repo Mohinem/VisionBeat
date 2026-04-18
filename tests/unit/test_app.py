@@ -1010,6 +1010,71 @@ def test_runtime_predictive_hybrid_mode_fires_on_matching_completion() -> None:
     assert runtime.overlay.calls[0][1].predictive_status == "p=0.84/0.60 top=kick 0.91 arm=--"
 
 
+def test_runtime_predictive_hybrid_mode_latches_arm_across_conflicting_status() -> None:
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "hybrid",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(image=FakeFrame("frame-0"), captured_at=1.00, frame_index=9),
+                CameraFrame(image=FakeFrame("frame-1"), captured_at=1.03, frame_index=10),
+            ]
+        ),
+        tracker=FakeTracker([make_pose(1.00), make_pose(1.03)]),
+        detector=FakeDetector(
+            events_by_frame=[[], []],
+            candidates_by_frame=[(), ()],
+            cooldowns=[0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False]),
+        predictive_shadow_runner=FakePredictiveShadowRunner(
+            (),
+            status_summary="p=0.84/0.60 top=snare 0.88",
+            latest_status=PredictiveStatus(
+                available_window_frames=24,
+                required_window_size=24,
+                threshold=0.6,
+                timing_probability=0.84,
+                predicted_gesture=GestureType.SNARE,
+                predicted_gesture_confidence=0.88,
+                class_probabilities={"kick": 0.12, "snare": 0.88},
+            ),
+            prediction_horizon_frames=3,
+        ),
+    )
+
+    runtime.process_next_frame()
+    runtime.predictive_shadow_runner.latest_status = PredictiveStatus(
+        available_window_frames=24,
+        required_window_size=24,
+        threshold=0.6,
+        timing_probability=0.93,
+        predicted_gesture=GestureType.KICK,
+        predicted_gesture_confidence=0.92,
+        class_probabilities={"kick": 0.92, "snare": 0.08},
+    )
+    runtime.predictive_shadow_runner._status_summary = "p=0.93/0.60 top=kick 0.92"
+
+    runtime.process_next_frame()
+
+    assert runtime.audio.triggers == []
+    assert runtime.overlay.calls[0][1].predictive_status == (
+        "p=0.84/0.60 top=snare 0.88 arm=snare 0.88 ttl=4"
+    )
+    assert runtime.overlay.calls[1][1].predictive_status == (
+        "p=0.93/0.60 top=kick 0.92 arm=snare 0.88 ttl=3"
+    )
+
+
 def test_runtime_predictive_hybrid_mode_rejects_mismatched_completion() -> None:
     recorder = FakeRecorder()
     latest_status = PredictiveStatus(
@@ -1062,7 +1127,9 @@ def test_runtime_predictive_hybrid_mode_rejects_mismatched_completion() -> None:
 
     assert runtime.audio.triggers == []
     assert recorder.predictive_live_triggers == []
-    assert runtime.overlay.calls[0][1].predictive_status == "p=0.84/0.60 top=kick 0.91 arm=--"
+    assert runtime.overlay.calls[0][1].predictive_status == (
+        "p=0.84/0.60 top=kick 0.91 arm=kick 0.91 ttl=9"
+    )
 
 
 def test_compute_fps_handles_initial_non_increasing_and_increasing_timestamps() -> None:

@@ -845,6 +845,15 @@ class VisionBeatRuntime:
             armed_frame_index=frame_index,
             expires_after_frame_index=frame_index + self._predictive_completion_horizon_frames(),
         )
+        if current_arm is not None and current_arm.gesture != refreshed_arm.gesture:
+            logger.debug(
+                "Predictive completion arm retained gesture=%s frame=%s despite "
+                "conflicting status gesture=%s",
+                current_arm.gesture,
+                frame_index,
+                refreshed_arm.gesture,
+            )
+            return
         if (
             current_arm is not None
             and current_arm.gesture == refreshed_arm.gesture
@@ -858,7 +867,7 @@ class VisionBeatRuntime:
                 armed_frame_index=current_arm.armed_frame_index,
                 expires_after_frame_index=refreshed_arm.expires_after_frame_index,
             )
-        elif current_arm is None or current_arm.gesture != refreshed_arm.gesture:
+        elif current_arm is None:
             logger.debug(
                 "Predictive completion arm set gesture=%s timing_probability=%.2f "
                 "gesture_confidence=%.2f frame=%s expires_after=%s",
@@ -887,13 +896,12 @@ class VisionBeatRuntime:
             return
         if event.gesture is not arm.gesture:
             logger.info(
-                "Predictive completion gate cleared mismatched arm predicted=%s "
+                "Predictive completion gate ignored mismatched heuristic predicted=%s "
                 "heuristic=%s frame=%s",
                 arm.gesture,
                 event.gesture,
                 frame_index,
             )
-            self._predictive_completion_arm = None
             return
         live_event = GestureEvent(
             gesture=arm.gesture,
