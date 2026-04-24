@@ -6,4 +6,23 @@ __pycache__/
 .venv/
 .coverage
 htmlcov/
+
+# Local audio assets
 assets/samples/*.wav
+
+# Experiment outputs
+outputs/
+outputs*/
+**/visionbeat_cnn_run_*/
+
+# Generated offline dataset artifacts
+*.train.npz
+*.samples.npz
+*.pt
+*.pth
+*.features.csv
+*.features.csv.schema.json
+*_features.csv
+*_features.csv.schema.json
+*_labeled.csv
+*_labeled.csv.schema.json

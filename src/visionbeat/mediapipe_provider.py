@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
+from types import ModuleType
 from types import SimpleNamespace
 from typing import Any, Final
 from urllib.error import URLError
@@ -26,6 +28,41 @@ _POSE_LANDMARKER_MODEL_URL: Final[str] = (
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
     "pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
 )
+_ALL_POSE_LANDMARKS: Final[tuple[str, ...]] = (
+    "nose",
+    "left_eye_inner",
+    "left_eye",
+    "left_eye_outer",
+    "right_eye_inner",
+    "right_eye",
+    "right_eye_outer",
+    "left_ear",
+    "right_ear",
+    "mouth_left",
+    "mouth_right",
+    "left_shoulder",
+    "right_shoulder",
+    "left_elbow",
+    "right_elbow",
+    "left_wrist",
+    "right_wrist",
+    "left_pinky",
+    "right_pinky",
+    "left_index",
+    "right_index",
+    "left_thumb",
+    "right_thumb",
+    "left_hip",
+    "right_hip",
+    "left_knee",
+    "right_knee",
+    "left_ankle",
+    "right_ankle",
+    "left_heel",
+    "right_heel",
+    "left_foot_index",
+    "right_foot_index",
+)
 _POSE_LANDMARKS: Final[dict[str, int]] = {
     "left_shoulder": 11,
     "right_shoulder": 12,
@@ -43,6 +80,8 @@ class MediaPipePoseProvider(PoseProvider):
     config: TrackerConfig
     _cv2: Any | None = field(init=False, default=None)
     _pose: Any = field(init=False)
+    landmark_names: tuple[str, ...] = field(init=False, default=tuple(_POSE_LANDMARKS))
+    all_landmark_names: tuple[str, ...] = field(init=False, default=_ALL_POSE_LANDMARKS)
 
     @staticmethod
     def _try_load_pose_factory(import_failures: list[str]) -> Any | None:
@@ -167,9 +206,10 @@ class MediaPipePoseProvider(PoseProvider):
             self.config.min_tracking_confidence,
         )
         import_failures: list[str] = []
-        pose_factory = self._try_load_pose_factory(import_failures)
-        if pose_factory is None:
-            pose_factory = self._load_tasks_pose_factory(import_failures)
+        with _temporary_sounddevice_stub():
+            pose_factory = self._try_load_pose_factory(import_failures)
+            if pose_factory is None:
+                pose_factory = self._load_tasks_pose_factory(import_failures)
         if pose_factory is None:
             failure_lines = (
                 "\n".join(f"- {failure}" for failure in import_failures)
@@ -226,17 +266,21 @@ class MediaPipePoseProvider(PoseProvider):
                 status="no_person_detected",
             )
 
+        raw_landmarks = {
+            name: LandmarkPoint(
+                x=result.pose_landmarks.landmark[index].x,
+                y=result.pose_landmarks.landmark[index].y,
+                z=result.pose_landmarks.landmark[index].z,
+                visibility=result.pose_landmarks.landmark[index].visibility,
+            )
+            for index, name in enumerate(_ALL_POSE_LANDMARKS)
+        }
         landmarks: dict[str, LandmarkPoint] = {}
         for name, index in _POSE_LANDMARKS.items():
-            landmark = result.pose_landmarks.landmark[index]
+            landmark = raw_landmarks[name]
             if landmark.visibility < self.config.min_tracking_confidence:
                 continue
-            landmarks[name] = LandmarkPoint(
-                x=landmark.x,
-                y=landmark.y,
-                z=landmark.z,
-                visibility=landmark.visibility,
-            )
+            landmarks[name] = landmark
 
         status = "tracking" if landmarks else "landmarks_below_confidence_threshold"
         logger.debug(
@@ -249,6 +293,7 @@ class MediaPipePoseProvider(PoseProvider):
         return TrackerOutput(
             timestamp=frame_timestamp,
             landmarks=landmarks,
+            raw_landmarks=raw_landmarks,
             person_detected=True,
             status=status,
         )
@@ -257,6 +302,39 @@ class MediaPipePoseProvider(PoseProvider):
         """Close MediaPipe resources."""
         logger.info("Closing pose backend=%s", self.config.backend)
         self._pose.close()
+
+
+@contextmanager
+def _temporary_sounddevice_stub():
+    """Prevent MediaPipe's unused audio Tasks import from hanging on sounddevice.
+
+    VisionBeat only needs MediaPipe vision APIs for pose extraction, but recent
+    MediaPipe wheels import the audio Tasks package at module import time. In
+    environments where `sounddevice` hangs during import, that blocks the pose
+    backend before any tracking code runs. A temporary stub keeps the audio
+    package importable while leaving the rest of the process unchanged once the
+    MediaPipe modules are loaded.
+    """
+
+    if "sounddevice" in sys.modules:
+        yield
+        return
+
+    stub = ModuleType("sounddevice")
+
+    class _UnavailableInputStream:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise ImportError(
+                "sounddevice is unavailable in this environment; "
+                "MediaPipe audio Tasks cannot be used."
+            )
+
+    stub.InputStream = _UnavailableInputStream
+    sys.modules["sounddevice"] = stub
+    try:
+        yield
+    finally:
+        sys.modules.pop("sounddevice", None)
 
 
 class _TasksPoseAdapter:

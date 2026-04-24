@@ -146,6 +146,7 @@ def test_tracker_output_normalizes_landmarks_candidates_and_status() -> None:
     output = TrackerOutput(
         timestamp=FrameTimestamp(seconds=1.25),
         landmarks={"right_wrist": {"x": 0.4, "y": 0.5, "z": -0.2, "visibility": 1.0}},
+        raw_landmarks={"nose": {"x": 0.1, "y": 0.2, "z": -0.3, "visibility": 0.7}},
         candidates=(
             {
                 "gesture": "kick",
@@ -161,6 +162,7 @@ def test_tracker_output_normalizes_landmarks_candidates_and_status() -> None:
     assert output.person_detected is True
     assert output.status == "unknown"
     assert isinstance(output.get("right_wrist"), LandmarkPoint)
+    assert isinstance(output.raw_landmarks["nose"], LandmarkPoint)
     assert isinstance(output.candidates[0], DetectionCandidate)
     assert TrackerOutput.from_dict(output.to_dict()) == output
 
@@ -169,6 +171,7 @@ def test_tracker_output_can_be_mirrored_horizontally() -> None:
     output = TrackerOutput(
         timestamp=FrameTimestamp(seconds=1.25),
         landmarks={"right_wrist": LandmarkPoint(x=0.2, y=0.5, z=-0.2, visibility=0.9)},
+        raw_landmarks={"nose": LandmarkPoint(x=0.3, y=0.2, z=0.1, visibility=0.8)},
         person_detected=True,
         status="tracking",
     )
@@ -178,26 +181,44 @@ def test_tracker_output_can_be_mirrored_horizontally() -> None:
     assert mirrored.get("right_wrist").x == pytest.approx(0.8)
     assert mirrored.get("right_wrist").y == pytest.approx(0.5)
     assert mirrored.get("right_wrist").z == pytest.approx(-0.2)
+    assert mirrored.raw_landmarks["nose"].x == pytest.approx(0.7)
 
 
 @pytest.mark.parametrize(
-    ("fps", "cooldown_remaining_seconds"),
-    [(None, 0.0), (60.0, 0.25)],
+    ("fps", "capture_fps", "inference_fps", "render_fps", "pipeline_latency_ms", "cooldown_remaining_seconds"),
+    [
+        (None, None, None, None, None, 0.0),
+        (60.0, 30.0, 18.0, 30.0, 42.0, 0.25),
+    ],
 )
 def test_render_state_accepts_valid_runtime_values(
     fps: float | None,
+    capture_fps: float | None,
+    inference_fps: float | None,
+    render_fps: float | None,
+    pipeline_latency_ms: float | None,
     cooldown_remaining_seconds: float,
 ) -> None:
     state = RenderState(
         pose=TrackerOutput(timestamp=FrameTimestamp(seconds=1.0)),
         frame_index=3,
         fps=fps,
+        capture_fps=capture_fps,
+        inference_fps=inference_fps,
+        render_fps=render_fps,
         cooldown_remaining_seconds=cooldown_remaining_seconds,
+        predictive_status=" p=0.23/0.30 top=kick 0.71 ",
+        pipeline_latency_ms=pipeline_latency_ms,
     )
 
     assert state.frame_index == 3
     assert state.fps == fps
+    assert state.capture_fps == capture_fps
+    assert state.inference_fps == inference_fps
+    assert state.render_fps == render_fps
+    assert state.pipeline_latency_ms == pipeline_latency_ms
     assert state.cooldown_remaining_seconds == cooldown_remaining_seconds
+    assert state.predictive_status == "p=0.23/0.30 top=kick 0.71"
 
 
 @pytest.mark.parametrize(
@@ -205,7 +226,11 @@ def test_render_state_accepts_valid_runtime_values(
     [
         ("frame_index", -1, "frame_index"),
         ("fps", 0.0, "fps"),
+        ("capture_fps", 0.0, "capture_fps"),
+        ("inference_fps", 0.0, "inference_fps"),
+        ("render_fps", 0.0, "render_fps"),
         ("cooldown_remaining_seconds", -0.1, "cooldown_remaining_seconds"),
+        ("pipeline_latency_ms", -0.1, "pipeline_latency_ms"),
     ],
 )
 def test_render_state_rejects_invalid_runtime_values(
