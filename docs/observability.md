@@ -54,6 +54,16 @@ VisionBeat emits structured log payloads for:
 - gesture candidates
 - confirmed triggers
 - cooldown suppression
+- predictive shadow/live triggers
+- rhythm-prediction pending, matched, missed, and expired outcomes
+- rhythm live triggers when `rhythm_trigger_mode: direct` plays a predicted beat
+
+Rhythm-prediction payloads include both machine-friendly timing fields and a
+human-readable `status_description`. The key fields for the ARJ experiment are
+`predicted_time_seconds`, `actual_time_seconds`, `error_ms`,
+`expires_after_seconds`, `seconds_until_prediction`, `seconds_until_expiry`,
+`match_tolerance_seconds`, `confidence`, `repetition_count`, `jitter`, `outcome`,
+and `trigger_mode`.
 
 A typical trigger log line looks like this:
 
@@ -133,3 +143,8 @@ To diagnose sluggish triggering:
    - Lower frame rates reduce the temporal resolution of velocity estimates.
 
 For latency experiments, CSV is convenient for spreadsheet charting, while JSONL is better for scripting and timeline reconstruction.
+
+Rhythm-prediction evaluation uses the structured application log rather than the
+optional gesture event sink. See
+[`docs/rhythm_prediction_evaluation.md`](rhythm_prediction_evaluation.md) for the
+ARJ rhythm-continuation test protocol and the analysis helper.

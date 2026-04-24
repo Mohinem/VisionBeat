@@ -85,3 +85,15 @@ threshold = 0.6
 trigger_cooldown_frames = 6
 trigger_max_gap_frames = 1
 device = "auto"
+# Repetition-based prediction is available but disabled by default.
+# Modes: shadow logs only, arm_only arms hybrid completion, direct may trigger audio.
+rhythm_prediction_enabled = false
+rhythm_min_hits = 3
+rhythm_jitter_tolerance = 0.18
+rhythm_min_interval_seconds = 0.25
+rhythm_max_interval_seconds = 2.0
+rhythm_max_horizon_seconds = 2.0
+rhythm_expiry_ratio = 1.75
+rhythm_confidence_threshold = 0.70
+rhythm_match_tolerance_seconds = 0.12
+rhythm_trigger_mode = "shadow"

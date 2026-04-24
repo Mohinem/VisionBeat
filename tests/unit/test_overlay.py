@@ -148,12 +148,18 @@ def test_overlay_renderer_debug_panel_includes_predictive_status() -> None:
         pose=make_pose(),
         frame_index=4,
         predictive_status="p=0.23/0.30 top=kick 0.71",
+        rhythm_status="mode=direct kick next @2.500s (+500ms)",
     )
 
     renderer.render(frame, state)
 
     assert any(
         name == "putText" and args[1] == "Predictive: p=0.23/0.30 top=kick 0.71"
+        for name, args in fake_cv2.calls
+    )
+    assert any(
+        name == "putText"
+        and args[1] == "Rhythm: mode=direct kick next @2.500s (+500ms)"
         for name, args in fake_cv2.calls
     )
 
@@ -180,6 +186,56 @@ def test_draw_trigger_flash_renders_centered_red_block_with_sound_name() -> None
     assert ("rectangle", (frame, (32, 24), (128, 96), (0, 0, 255), -1)) in fake_cv2.calls
     assert any(
         name == "putText" and args[1] == "KICK"
+        for name, args in fake_cv2.calls
+    )
+
+
+def test_draw_trigger_flash_labels_rhythm_predictor_triggers() -> None:
+    frame = FakeFrame(360, 640)
+    fake_cv2 = FakeCV2()
+    pose = make_pose()
+    state = RenderState(
+        pose=pose,
+        frame_index=0,
+        confirmed_gesture=GestureEvent(
+            gesture=GestureType.SNARE,
+            confidence=0.88,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=0.95),
+            label="Snare (rhythm predictor)",
+        ),
+    )
+
+    result = draw_trigger_flash(frame, state, cv2_module=fake_cv2)
+
+    assert result is frame
+    assert any(
+        name == "putText" and args[1] == "Snare (rhythm predictor)"
+        for name, args in fake_cv2.calls
+    )
+
+
+def test_draw_trigger_flash_labels_cnn_predictor_triggers() -> None:
+    frame = FakeFrame(360, 640)
+    fake_cv2 = FakeCV2()
+    pose = make_pose()
+    state = RenderState(
+        pose=pose,
+        frame_index=0,
+        confirmed_gesture=GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.88,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=0.95),
+            label="Kick (CNN)",
+        ),
+    )
+
+    result = draw_trigger_flash(frame, state, cv2_module=fake_cv2)
+
+    assert result is frame
+    assert any(
+        name == "putText" and args[1] == "Kick (CNN)"
         for name, args in fake_cv2.calls
     )
 

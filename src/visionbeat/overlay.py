@@ -168,6 +168,11 @@ def _build_debug_labels(state: RenderState) -> list[str]:
             else "Predictive: --"
         ),
         (
+            f"Rhythm: {state.rhythm_status}"
+            if state.rhythm_status is not None
+            else "Rhythm: --"
+        ),
+        (
             f"Audio: {state.audio_status}"
             if state.audio_status is not None
             else "Audio: --"
@@ -260,6 +265,35 @@ def draw_labels(
     return frame
 
 
+def _trigger_flash_text(state: RenderState) -> str:
+    """Return the visible sound label for the centered trigger flash."""
+    assert state.confirmed_gesture is not None
+    event = state.confirmed_gesture
+    label = event.label.strip()
+    normalized_label = label.lower()
+    if (
+        "rhythm predictor" in normalized_label
+        or normalized_label.startswith("rhythm predicted")
+        or normalized_label.startswith("rhythm-arm")
+    ):
+        return f"{event.gesture.value.title()} (rhythm predictor)"
+    if (
+        "cnn predictor" in normalized_label
+        or normalized_label.endswith("(cnn)")
+        or normalized_label.startswith("predictive ")
+        or normalized_label.startswith("predictive-arm")
+    ):
+        return f"{event.gesture.value.title()} (CNN)"
+    return event.gesture.value.upper()
+
+
+def _trigger_flash_font_scale(text: str, flash_width: int) -> float:
+    """Keep longer predictor labels inside the trigger flash."""
+    if "(" not in text:
+        return 1.4
+    return max(0.45, min(1.0, flash_width / max(18.0 * len(text), 1.0)))
+
+
 def draw_trigger_flash(
     frame: Frame,
     state: RenderState,
@@ -286,9 +320,11 @@ def draw_trigger_flash(
     right = min(width, left + flash_width)
     bottom = min(height, top + flash_height)
     cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), -1)
-    sound_name = state.confirmed_gesture.gesture.value.upper()
+    sound_name = _trigger_flash_text(state)
+    font_scale = _trigger_flash_font_scale(sound_name, flash_width)
+    thickness = 4 if font_scale >= 1.0 else 2
     text_origin = (
-        left + max(10, flash_width // 8),
+        left + max(10, flash_width // 10),
         top + max(28, int(flash_height * 0.62)),
     )
     cv2.putText(
@@ -296,8 +332,8 @@ def draw_trigger_flash(
         sound_name,
         text_origin,
         cv2.FONT_HERSHEY_SIMPLEX,
-        1.4,
+        font_scale,
         (255, 255, 255),
-        4,
+        thickness,
     )
     return frame

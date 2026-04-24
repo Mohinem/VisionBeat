@@ -114,6 +114,25 @@ logging:
   event_log_format: jsonl
   session_recording_path: null
   session_recording_mode: tracker_outputs
+
+predictive:
+  mode: hybrid
+  timing_checkpoint_path: outputs/future8_w24_r1r2_train_r3_val/visionbeat_cnn_run_001/checkpoints/best_model.pt
+  gesture_checkpoint_path: outputs/gesture_classifier_future8_r1r2_train_r3_val/visionbeat_gesture_classifier_run_001/checkpoints/best_model.pt
+  threshold: 0.60
+  trigger_cooldown_frames: 6
+  trigger_max_gap_frames: 1
+  device: auto
+  rhythm_prediction_enabled: false
+  rhythm_min_hits: 3
+  rhythm_jitter_tolerance: 0.18
+  rhythm_min_interval_seconds: 0.25
+  rhythm_max_interval_seconds: 2.0
+  rhythm_max_horizon_seconds: 2.0
+  rhythm_expiry_ratio: 1.75
+  rhythm_confidence_threshold: 0.70
+  rhythm_match_tolerance_seconds: 0.12
+  rhythm_trigger_mode: shadow
 ```
 
 ## Section-by-section reference
@@ -215,6 +234,28 @@ Controls log output and optional event tracing.
 - `event_log_format` (`jsonl | csv`, default `jsonl`): file format for event traces.
 - `session_recording_path` (`str | null`, default `null`): optional directory where VisionBeat creates timestamped session bundles for replay and analysis.
 - `session_recording_mode` (`tracker_outputs | raw_frames | both`, default `tracker_outputs`): whether a session bundle stores normalized tracker outputs only, raw camera frames only, or both.
+
+### `predictive`
+
+Controls optional predictive inference and repetition-based rhythm-prediction settings.
+
+- `mode` (`disabled | shadow | primary | hybrid`, default `disabled`): live predictive mode. `shadow` logs predictive CNN events passively, `primary` lets the predictive CNN drive audio, and `hybrid` lets prediction arm a completion-aligned heuristic trigger.
+- `timing_checkpoint_path` (`str | null`): timing-model checkpoint path, required when `mode` is not `disabled`.
+- `gesture_checkpoint_path` (`str | null`): kick/snare classifier checkpoint path, required when `mode` is not `disabled`.
+- `threshold` (`float`, default `0.6`): predictive timing threshold in `0.0..1.0`.
+- `trigger_cooldown_frames` (`int`, default `6`): decoder cooldown in processed frames.
+- `trigger_max_gap_frames` (`int`, default `1`): maximum frame gap for merging above-threshold predictive runs.
+- `device` (`auto | cpu | cuda`, default `auto`): device selection for predictive inference.
+- `rhythm_prediction_enabled` (`bool`, default `false`): enable repetition-based rhythm prediction from accepted live gesture timestamps.
+- `rhythm_min_hits` (`int`, default `3`): minimum accepted hits required before a repeated pulse can produce a rhythm prediction.
+- `rhythm_jitter_tolerance` (`float`, default `0.18`): maximum normalized timing jitter accepted for a stable pulse.
+- `rhythm_min_interval_seconds` (`float`, default `0.25`): shortest accepted inter-onset interval for rhythm estimation.
+- `rhythm_max_interval_seconds` (`float`, default `2.0`): longest accepted inter-onset interval for rhythm estimation.
+- `rhythm_max_horizon_seconds` (`float`, default `2.0`): longest next-beat prediction horizon allowed.
+- `rhythm_expiry_ratio` (`float`, default `1.75`): multiplier on the estimated interval used to expire stale rhythm expectations after a missed continuation.
+- `rhythm_confidence_threshold` (`float`, default `0.70`): minimum rhythm confidence required before rhythm prediction can arm the hybrid completion gate or directly trigger audio.
+- `rhythm_match_tolerance_seconds` (`float`, default `0.12`): timestamp tolerance used to classify expected beats as matched or missed.
+- `rhythm_trigger_mode` (`shadow | arm_only | direct`, default `shadow`): rhythm behavior mode. `shadow` is passive logging, `arm_only` may arm completion-aligned hybrid firing, and `direct` may play the predicted next kick/snare directly. Direct rhythm triggers do not feed themselves back into rhythm learning.
 
 ## Calibration guide
 

@@ -841,6 +841,16 @@ class PredictiveConfig:
     trigger_cooldown_frames: int = 6
     trigger_max_gap_frames: int = 1
     device: str = "auto"
+    rhythm_prediction_enabled: bool = False
+    rhythm_min_hits: int = 3
+    rhythm_jitter_tolerance: float = 0.18
+    rhythm_min_interval_seconds: float = 0.25
+    rhythm_max_interval_seconds: float = 2.0
+    rhythm_max_horizon_seconds: float = 2.0
+    rhythm_expiry_ratio: float = 1.75
+    rhythm_confidence_threshold: float = 0.70
+    rhythm_match_tolerance_seconds: float = 0.12
+    rhythm_trigger_mode: str = "shadow"
 
     @property
     def enabled(self) -> bool:
@@ -867,6 +877,16 @@ class PredictiveConfig:
         """Return whether predictive outputs should arm a completion-aligned trigger gate."""
         return self.mode == "hybrid"
 
+    @property
+    def rhythm_arms_completion_gate(self) -> bool:
+        """Return whether rhythm predictions should only arm completion-aligned firing."""
+        return self.rhythm_prediction_enabled and self.rhythm_trigger_mode == "arm_only"
+
+    @property
+    def rhythm_triggers_audio(self) -> bool:
+        """Return whether rhythm predictions may directly trigger live audio."""
+        return self.rhythm_prediction_enabled and self.rhythm_trigger_mode == "direct"
+
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> PredictiveConfig:
         """Build predictive-model configuration from a validated mapping."""
@@ -881,6 +901,16 @@ class PredictiveConfig:
                 "trigger_cooldown_frames",
                 "trigger_max_gap_frames",
                 "device",
+                "rhythm_prediction_enabled",
+                "rhythm_min_hits",
+                "rhythm_jitter_tolerance",
+                "rhythm_min_interval_seconds",
+                "rhythm_max_interval_seconds",
+                "rhythm_max_horizon_seconds",
+                "rhythm_expiry_ratio",
+                "rhythm_confidence_threshold",
+                "rhythm_match_tolerance_seconds",
+                "rhythm_trigger_mode",
             }
         )
         enabled = reader.boolean("enabled", default=False) if "enabled" in reader.payload else None
@@ -900,6 +930,31 @@ class PredictiveConfig:
         device = (reader.string("device", default="auto", non_empty=True) or "auto").lower()
         if device not in {"auto", "cpu", "cuda"}:
             raise ConfigError("predictive.device: must be one of 'auto', 'cpu', or 'cuda'.")
+        rhythm_trigger_mode = (
+            reader.string("rhythm_trigger_mode", default="shadow", non_empty=True) or "shadow"
+        ).lower()
+        if rhythm_trigger_mode not in {"shadow", "arm_only", "direct"}:
+            raise ConfigError(
+                "predictive.rhythm_trigger_mode: must be one of 'shadow', "
+                "'arm_only', or 'direct'."
+            )
+        rhythm_min_interval_seconds = reader.number(
+            "rhythm_min_interval_seconds",
+            default=0.25,
+            minimum=0.0,
+            inclusive_min=False,
+        )
+        rhythm_max_interval_seconds = reader.number(
+            "rhythm_max_interval_seconds",
+            default=2.0,
+            minimum=0.0,
+            inclusive_min=False,
+        )
+        if rhythm_max_interval_seconds <= rhythm_min_interval_seconds:
+            raise ConfigError(
+                "predictive.rhythm_max_interval_seconds: must be greater than "
+                "predictive.rhythm_min_interval_seconds."
+            )
         config = cls(
             mode=resolved_mode,
             timing_checkpoint_path=timing_checkpoint_path or None,
@@ -916,6 +971,42 @@ class PredictiveConfig:
                 minimum=0,
             ),
             device=device,
+            rhythm_prediction_enabled=reader.boolean(
+                "rhythm_prediction_enabled",
+                default=False,
+            ),
+            rhythm_min_hits=reader.integer("rhythm_min_hits", default=3, minimum=3),
+            rhythm_jitter_tolerance=reader.number(
+                "rhythm_jitter_tolerance",
+                default=0.18,
+                minimum=0.0,
+            ),
+            rhythm_min_interval_seconds=rhythm_min_interval_seconds,
+            rhythm_max_interval_seconds=rhythm_max_interval_seconds,
+            rhythm_max_horizon_seconds=reader.number(
+                "rhythm_max_horizon_seconds",
+                default=2.0,
+                minimum=0.0,
+                inclusive_min=False,
+            ),
+            rhythm_expiry_ratio=reader.number(
+                "rhythm_expiry_ratio",
+                default=1.75,
+                minimum=1.0,
+                inclusive_min=False,
+            ),
+            rhythm_confidence_threshold=reader.number(
+                "rhythm_confidence_threshold",
+                default=0.70,
+                minimum=0.0,
+                maximum=1.0,
+            ),
+            rhythm_match_tolerance_seconds=reader.number(
+                "rhythm_match_tolerance_seconds",
+                default=0.12,
+                minimum=0.0,
+            ),
+            rhythm_trigger_mode=rhythm_trigger_mode,
         )
         if not config.enabled:
             return config
@@ -940,6 +1031,16 @@ class PredictiveConfig:
             "trigger_cooldown_frames": self.trigger_cooldown_frames,
             "trigger_max_gap_frames": self.trigger_max_gap_frames,
             "device": self.device,
+            "rhythm_prediction_enabled": self.rhythm_prediction_enabled,
+            "rhythm_min_hits": self.rhythm_min_hits,
+            "rhythm_jitter_tolerance": self.rhythm_jitter_tolerance,
+            "rhythm_min_interval_seconds": self.rhythm_min_interval_seconds,
+            "rhythm_max_interval_seconds": self.rhythm_max_interval_seconds,
+            "rhythm_max_horizon_seconds": self.rhythm_max_horizon_seconds,
+            "rhythm_expiry_ratio": self.rhythm_expiry_ratio,
+            "rhythm_confidence_threshold": self.rhythm_confidence_threshold,
+            "rhythm_match_tolerance_seconds": self.rhythm_match_tolerance_seconds,
+            "rhythm_trigger_mode": self.rhythm_trigger_mode,
         }
 
 

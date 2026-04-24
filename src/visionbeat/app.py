@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field, replace
+from statistics import median
 from typing import Any, Protocol
 
 from visionbeat.audio import AudioEngine, create_audio_engine
 from visionbeat.camera import CameraFrame, CameraSource
-from visionbeat.config import AppConfig
+from visionbeat.config import AppConfig, PredictiveConfig
 from visionbeat.features import (
     CanonicalFeatureExtractor,
     CanonicalFeatureSchema,
@@ -39,6 +41,12 @@ from visionbeat.predictive_shadow import (
     ShadowPredictionEvent,
     build_predictive_shadow_runner,
 )
+from visionbeat.rhythm_prediction import (
+    RhythmPrediction,
+    RhythmPredictionConfig,
+    RhythmPredictionOutcome,
+    RhythmPredictionTracker,
+)
 from visionbeat.session_recording import SessionRecorder, build_session_recorder
 from visionbeat.transport import (
     GestureEventTransport,
@@ -47,6 +55,21 @@ from visionbeat.transport import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _predictor_trigger_label(gesture: GestureType, predictor: str) -> str:
+    """Return the short live label used for predictor-driven audio triggers."""
+    normalized = predictor.strip().lower()
+    if normalized == "cnn":
+        return f"{gesture.value.title()} (CNN)"
+    if normalized == "rhythm":
+        return f"{gesture.value.title()} (rhythm predictor)"
+    return f"{gesture.value.title()} ({predictor.strip()})"
+
+
+def _format_delta_ms(seconds: float) -> str:
+    """Format a signed time delta for compact live status text."""
+    return f"{seconds * 1000.0:+.0f}ms"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +82,10 @@ class _PredictiveCompletionArm:
     class_probabilities: dict[str, float]
     armed_frame_index: int
     expires_after_frame_index: int
+    source: str = "cnn"
+    armed_timestamp_seconds: float | None = None
+    expected_timestamp_seconds: float | None = None
+    expires_after_timestamp_seconds: float | None = None
 
     def frames_remaining(self, *, frame_index: int) -> int:
         """Return the remaining completion-gate lifetime in frames."""
@@ -121,6 +148,27 @@ class OpenCVPreviewWindow:
         self._cv2.destroyAllWindows()
 
 
+def build_rhythm_prediction_tracker(
+    config: PredictiveConfig,
+) -> RhythmPredictionTracker | None:
+    """Build the optional passive rhythm tracker from predictive configuration."""
+    if not config.rhythm_prediction_enabled:
+        return None
+    default_history_size = RhythmPredictionConfig().history_size
+    return RhythmPredictionTracker(
+        RhythmPredictionConfig(
+            min_hits=config.rhythm_min_hits,
+            history_size=max(default_history_size, config.rhythm_min_hits),
+            min_interval_seconds=config.rhythm_min_interval_seconds,
+            max_interval_seconds=config.rhythm_max_interval_seconds,
+            jitter_tolerance=config.rhythm_jitter_tolerance,
+            expiry_ratio=config.rhythm_expiry_ratio,
+            max_horizon_seconds=config.rhythm_max_horizon_seconds,
+            match_tolerance_seconds=config.rhythm_match_tolerance_seconds,
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _ProcessedFrameSnapshot:
     """Fully processed runtime state for one analyzed camera frame."""
@@ -181,6 +229,13 @@ class VisionBeatRuntime:
         default_factory=get_canonical_feature_schema
     )
     predictive_shadow_runner: PredictiveShadowRunner | None = None
+    rhythm_tracker: RhythmPredictionTracker | None = None
+    _rhythm_direct_triggered_prediction_ids: set[str] = field(
+        default_factory=set,
+        init=False,
+    )
+    _last_rhythm_outcome: RhythmPredictionOutcome | None = field(default=None, init=False)
+    _last_rhythm_outcome_timestamp_seconds: float | None = field(default=None, init=False)
     _last_confirmed_gesture: GestureEvent | None = field(default=None, init=False)
     _last_frame_time: float | None = field(default=None, init=False)
     _overlays_enabled: bool = field(default=True, init=False)
@@ -209,8 +264,10 @@ class VisionBeatRuntime:
         ):
             raise ValueError(
                 "live_feature_history_size must be at least the predictive shadow window size."
-            )
+        )
         self._feature_history = deque(maxlen=self.live_feature_history_size)
+        if self.rhythm_tracker is None:
+            self.rhythm_tracker = build_rhythm_prediction_tracker(self.config.predictive)
 
     def run(self) -> None:
         """Run the application until the preview window or frame source requests shutdown."""
@@ -346,14 +403,23 @@ class VisionBeatRuntime:
         try:
             while not stop_event.is_set():
                 with capture_state.condition:
-                    capture_state.condition.wait_for(
-                        lambda: stop_event.is_set()
-                        or capture_state.error is not None
-                        or (
-                            capture_state.latest_frame is not None
-                            and capture_state.latest_frame.frame_index != last_processed_frame_index
+                    expected_next_frame_index = last_processed_frame_index
+                    def fresh_frame_available(
+                        expected_frame_index: int = expected_next_frame_index,
+                    ) -> bool:
+                        return (
+                            stop_event.is_set()
+                            or capture_state.error is not None
+                            or (
+                                capture_state.latest_frame is not None
+                                and capture_state.latest_frame.frame_index
+                                != expected_frame_index
+                            )
+                            or capture_state.stopped
                         )
-                        or capture_state.stopped,
+
+                    capture_state.condition.wait_for(
+                        fresh_frame_available,
                         timeout=self.config.runtime.idle_sleep_seconds,
                     )
                     if stop_event.is_set():
@@ -427,11 +493,18 @@ class VisionBeatRuntime:
             pose,
             heuristic_events,
         )
-        self._refresh_predictive_completion_arm(frame_index=camera_frame.frame_index)
+        self._refresh_predictive_completion_arm(
+            frame_index=camera_frame.frame_index,
+            timestamp_seconds=pose.timestamp.seconds,
+        )
 
         if self.config.predictive.heuristic_drives_audio:
             for event in heuristic_events:
-                self._handle_confirmed_gesture(event, source="heuristic")
+                self._handle_confirmed_gesture(
+                    event,
+                    source="heuristic",
+                    frame_index=camera_frame.frame_index,
+                )
         elif self.config.predictive.predictive_uses_completion_gate:
             for event in heuristic_events:
                 self._handle_predictive_completion_gate(
@@ -446,6 +519,11 @@ class VisionBeatRuntime:
                 playback_frame_index=camera_frame.frame_index,
             )
 
+        self._advance_rhythm_predictions(
+            timestamp=pose.timestamp,
+            frame_index=camera_frame.frame_index,
+        )
+
         render_state = RenderState(
             pose=display_pose,
             frame_index=camera_frame.frame_index,
@@ -456,7 +534,11 @@ class VisionBeatRuntime:
             confirmed_gesture=self._last_confirmed_gesture,
             cooldown_remaining_seconds=self.detector.cooldown_remaining(timestamp),
             detector_status=self._detector_status(timestamp),
-            predictive_status=self._predictive_status(camera_frame.frame_index),
+            predictive_status=self._predictive_status(
+                camera_frame.frame_index,
+                timestamp_seconds=pose.timestamp.seconds,
+            ),
+            rhythm_status=self._rhythm_status(timestamp_seconds=pose.timestamp.seconds),
             audio_status=self._audio_status(),
             pipeline_latency_ms=max(0.0, (time.monotonic() - camera_frame.captured_at) * 1000.0),
         )
@@ -520,6 +602,9 @@ class VisionBeatRuntime:
             detector_status="warming up",
             predictive_status=(
                 "warming up" if self.config.predictive.enabled else None
+            ),
+            rhythm_status=(
+                "warming up" if self.config.predictive.rhythm_prediction_enabled else None
             ),
             audio_status=self._audio_status(),
         )
@@ -717,7 +802,12 @@ class VisionBeatRuntime:
         normalized = result.strip()
         return normalized or None
 
-    def _predictive_status(self, frame_index: int) -> str | None:
+    def _predictive_status(
+        self,
+        frame_index: int,
+        *,
+        timestamp_seconds: float | None = None,
+    ) -> str | None:
         """Return a short predictive-model summary when the runtime exposes one."""
         if self.predictive_shadow_runner is None:
             return None
@@ -732,13 +822,153 @@ class VisionBeatRuntime:
             return None
         if not self.config.predictive.predictive_uses_completion_gate:
             return normalized
-        arm = self._active_predictive_completion_arm(frame_index=frame_index)
+        arm = self._active_predictive_completion_arm(
+            frame_index=frame_index,
+            timestamp_seconds=timestamp_seconds,
+        )
         if arm is None:
             return f"{normalized} arm=--"
+        arm_label = (
+            arm.gesture.value
+            if arm.source == "cnn"
+            else f"{arm.source}:{arm.gesture.value}"
+        )
         return (
-            f"{normalized} arm={arm.gesture.value} {arm.gesture_confidence:.2f} "
+            f"{normalized} arm={arm_label} {arm.gesture_confidence:.2f} "
             f"ttl={arm.frames_remaining(frame_index=frame_index)}"
         )
+
+    def _rhythm_status(self, *, timestamp_seconds: float) -> str | None:
+        """Return a compact live summary of rhythm-continuation state."""
+        if not self.config.predictive.rhythm_prediction_enabled:
+            return None
+        if self.rhythm_tracker is None:
+            return "enabled but tracker unavailable"
+        active_predictions = self.rhythm_tracker.active_predictions(
+            timestamp_seconds=timestamp_seconds,
+        )
+        if active_predictions:
+            return " | ".join(
+                self._rhythm_prediction_status(prediction, timestamp_seconds=timestamp_seconds)
+                for prediction in active_predictions
+            )
+        recent_outcome = self._recent_rhythm_outcome_status(
+            timestamp_seconds=timestamp_seconds,
+        )
+        if recent_outcome is not None:
+            return recent_outcome
+        return self._rhythm_learning_status()
+
+    def _rhythm_prediction_status(
+        self,
+        prediction: RhythmPrediction,
+        *,
+        timestamp_seconds: float,
+    ) -> str:
+        """Describe one active rhythm expectation for the HUD."""
+        seconds_until_expected = prediction.seconds_until_expected(
+            timestamp_seconds=timestamp_seconds,
+        )
+        seconds_until_expiry = prediction.expires_after_seconds - timestamp_seconds
+        phase = "next" if seconds_until_expected > 0.0 else "due"
+        if prediction.confidence < self.config.predictive.rhythm_confidence_threshold:
+            phase = f"{phase}/low-conf"
+        return (
+            f"mode={self.config.predictive.rhythm_trigger_mode} "
+            f"{prediction.gesture.value} {phase} @{prediction.expected_timestamp_seconds:.3f}s "
+            f"({_format_delta_ms(seconds_until_expected)}) "
+            f"exp={_format_delta_ms(seconds_until_expiry)} "
+            f"int={prediction.interval_seconds:.3f}s "
+            f"conf={prediction.confidence:.2f}/"
+            f"{self.config.predictive.rhythm_confidence_threshold:.2f} "
+            f"jit={prediction.jitter_ratio:.2f} reps={prediction.repetition_count}"
+        )
+
+    def _recent_rhythm_outcome_status(self, *, timestamp_seconds: float) -> str | None:
+        """Describe the most recent rhythm outcome briefly after it happens."""
+        if (
+            self._last_rhythm_outcome is None
+            or self._last_rhythm_outcome_timestamp_seconds is None
+        ):
+            return None
+        outcome = self._last_rhythm_outcome
+        age_seconds = timestamp_seconds - self._last_rhythm_outcome_timestamp_seconds
+        if age_seconds < 0.0 or age_seconds > max(2.0, outcome.interval_seconds * 2.0):
+            return None
+        seconds_until_expiry = outcome.expires_after_seconds - timestamp_seconds
+        expired_suffix = "/expired" if seconds_until_expiry <= 0.0 else ""
+        error_text = "--" if outcome.error_ms is None else f"{outcome.error_ms:+.0f}ms"
+        actual_text = (
+            "--"
+            if outcome.actual_time_seconds is None
+            else f"{outcome.actual_time_seconds:.3f}s"
+        )
+        return (
+            f"mode={self.config.predictive.rhythm_trigger_mode} "
+            f"last={outcome.outcome}{expired_suffix} {outcome.gesture.value} "
+            f"expected={outcome.predicted_time_seconds:.3f}s actual={actual_text} "
+            f"err={error_text} exp={_format_delta_ms(seconds_until_expiry)} "
+            f"int={outcome.interval_seconds:.3f}s conf={outcome.confidence:.2f} "
+            f"jit={outcome.jitter_ratio:.2f} reps={outcome.repetition_count}"
+        )
+
+    def _rhythm_learning_status(self) -> str:
+        """Describe why no rhythm prediction is currently active."""
+        assert self.rhythm_tracker is not None
+        histories = [
+            (gesture, self.rhythm_tracker.history_for(gesture))
+            for gesture in GestureType
+            if self.rhythm_tracker.history_for(gesture)
+        ]
+        if not histories:
+            return (
+                f"mode={self.config.predictive.rhythm_trigger_mode} "
+                f"learning hits=0/{self.config.predictive.rhythm_min_hits}"
+            )
+        gesture, history = max(histories, key=lambda item: item[1][-1].timestamp_seconds)
+        hit_count = len(history)
+        last_timestamp = history[-1].timestamp_seconds
+        if hit_count < self.config.predictive.rhythm_min_hits:
+            return (
+                f"mode={self.config.predictive.rhythm_trigger_mode} "
+                f"learning {gesture.value} hits={hit_count}/"
+                f"{self.config.predictive.rhythm_min_hits} last={last_timestamp:.3f}s"
+            )
+        reason, interval_seconds, jitter_ratio = self._rhythm_inactive_reason(history)
+        detail = ""
+        if interval_seconds is not None and jitter_ratio is not None:
+            detail = f" int={interval_seconds:.3f}s jit={jitter_ratio:.2f}"
+        return (
+            f"mode={self.config.predictive.rhythm_trigger_mode} inactive {gesture.value} "
+            f"hits={hit_count} last={last_timestamp:.3f}s reason={reason}{detail}"
+        )
+
+    def _rhythm_inactive_reason(
+        self,
+        history: tuple[Any, ...],
+    ) -> tuple[str, float | None, float | None]:
+        """Return a compact reason why a retained history is not predictive."""
+        intervals = tuple(
+            current.timestamp_seconds - previous.timestamp_seconds
+            for previous, current in zip(history, history[1:], strict=False)
+        )
+        if not intervals:
+            return ("not-enough-intervals", None, None)
+        if any(
+            interval < self.config.predictive.rhythm_min_interval_seconds
+            or interval > self.config.predictive.rhythm_max_interval_seconds
+            for interval in intervals
+        ):
+            return ("interval-out-of-range", float(median(intervals)), None)
+        interval_seconds = float(median(intervals))
+        jitter_ratio = float(
+            median(abs(interval - interval_seconds) for interval in intervals)
+        ) / max(interval_seconds, 1.0e-9)
+        if jitter_ratio > self.config.predictive.rhythm_jitter_tolerance:
+            return ("unstable-jitter", interval_seconds, jitter_ratio)
+        if interval_seconds > self.config.predictive.rhythm_max_horizon_seconds:
+            return ("beyond-horizon", interval_seconds, jitter_ratio)
+        return ("waiting", interval_seconds, jitter_ratio)
 
     def _compute_fps(self, camera_frame: CameraFrame) -> float | None:
         """Compute an instantaneous FPS estimate from captured frame timestamps."""
@@ -752,8 +982,33 @@ class VisionBeatRuntime:
             return None
         return 1.0 / elapsed
 
-    def _handle_confirmed_gesture(self, event: GestureEvent, *, source: str) -> None:
+    def _handle_confirmed_gesture(
+        self,
+        event: GestureEvent,
+        *,
+        source: str,
+        frame_index: int | None = None,
+        observe_rhythm: bool = True,
+    ) -> None:
         """Log, persist, and play audio for one live trigger event."""
+        rhythm_duplicate = (
+            self._rhythm_direct_duplicate_for_event(event) if observe_rhythm else None
+        )
+        if rhythm_duplicate is not None:
+            logger.info(
+                "Suppressed duplicate %s gesture=%s after rhythm direct trigger "
+                "prediction_id=%s timestamp=%.3f",
+                source,
+                event.gesture,
+                rhythm_duplicate.prediction_id,
+                event.timestamp.seconds,
+            )
+            self._observe_rhythm_event(
+                event,
+                source=f"{source}_after_rhythm_direct",
+                frame_index=frame_index,
+            )
+            return
         logger.info(
             "Confirmed %s gesture=%s hand=%s confidence=%.2f timestamp=%.3f",
             source,
@@ -773,6 +1028,366 @@ class VisionBeatRuntime:
             )
         )
         self.transport.emit(event)
+        if observe_rhythm:
+            self._observe_rhythm_event(event, source=source, frame_index=frame_index)
+
+    def _rhythm_prediction_enabled(self) -> bool:
+        """Return whether rhythm prediction should run in the live runtime."""
+        return self.config.predictive.rhythm_prediction_enabled and self.rhythm_tracker is not None
+
+    def _rhythm_direct_duplicate_for_event(
+        self,
+        event: GestureEvent,
+    ) -> RhythmPrediction | None:
+        """Return a direct rhythm prediction already played for this real event."""
+        if not self.config.predictive.rhythm_triggers_audio or self.rhythm_tracker is None:
+            return None
+        for prediction in self.rhythm_tracker.active_predictions(
+            timestamp_seconds=event.timestamp.seconds,
+        ):
+            if prediction.prediction_id not in self._rhythm_direct_triggered_prediction_ids:
+                continue
+            if prediction.gesture is not event.gesture:
+                continue
+            if (
+                abs(event.timestamp.seconds - prediction.expected_timestamp_seconds)
+                <= self.config.predictive.rhythm_match_tolerance_seconds
+            ):
+                return prediction
+        return None
+
+    def _advance_rhythm_predictions(
+        self,
+        *,
+        timestamp: FrameTimestamp,
+        frame_index: int,
+    ) -> None:
+        """Advance rhythm state for the current live timestamp and log expirations."""
+        if not self._rhythm_prediction_enabled():
+            return
+        assert self.rhythm_tracker is not None
+        self._trigger_due_rhythm_predictions(
+            timestamp=timestamp,
+            frame_index=frame_index,
+        )
+        update = self.rhythm_tracker.advance_with_outcomes(timestamp_seconds=timestamp.seconds)
+        self._active_predictive_completion_arm(
+            frame_index=frame_index,
+            timestamp_seconds=timestamp.seconds,
+        )
+        for outcome in update.outcomes:
+            self._log_rhythm_prediction_outcome(
+                outcome,
+                current_timestamp=timestamp.seconds,
+                frame_index=frame_index,
+                source="advance",
+            )
+
+    def _observe_rhythm_event(
+        self,
+        event: GestureEvent,
+        *,
+        source: str,
+        frame_index: int | None,
+    ) -> None:
+        """Feed one accepted live gesture into the passive rhythm predictor."""
+        if not self._rhythm_prediction_enabled():
+            return
+        assert self.rhythm_tracker is not None
+        try:
+            update = self.rhythm_tracker.observe_event_with_outcomes(
+                event,
+                source=source,
+                frame_index=frame_index,
+            )
+        except ValueError as exc:
+            logger.warning("Rhythm observation ignored: %s", exc)
+            return
+        for outcome in update.outcomes:
+            self._log_rhythm_prediction_outcome(
+                outcome,
+                current_timestamp=event.timestamp.seconds,
+                frame_index=frame_index,
+                source=source,
+            )
+        if update.prediction is not None:
+            self._refresh_rhythm_completion_arm(
+                update.prediction,
+                current_timestamp_seconds=event.timestamp.seconds,
+                frame_index=frame_index,
+            )
+
+    def _trigger_due_rhythm_predictions(
+        self,
+        *,
+        timestamp: FrameTimestamp,
+        frame_index: int,
+    ) -> None:
+        """Trigger direct rhythm-predicted audio for due expectations."""
+        if not self.config.predictive.rhythm_triggers_audio:
+            return
+        assert self.rhythm_tracker is not None
+        for prediction in self.rhythm_tracker.active_predictions(
+            timestamp_seconds=timestamp.seconds,
+        ):
+            if prediction.prediction_id in self._rhythm_direct_triggered_prediction_ids:
+                continue
+            if prediction.confidence < self.config.predictive.rhythm_confidence_threshold:
+                continue
+            if timestamp.seconds < prediction.expected_timestamp_seconds:
+                continue
+            if (
+                timestamp.seconds - prediction.expected_timestamp_seconds
+                > self.config.predictive.rhythm_match_tolerance_seconds
+            ):
+                continue
+            self._handle_rhythm_direct_trigger(
+                prediction,
+                timestamp=timestamp,
+                frame_index=frame_index,
+            )
+
+    def _handle_rhythm_direct_trigger(
+        self,
+        prediction: RhythmPrediction,
+        *,
+        timestamp: FrameTimestamp,
+        frame_index: int,
+    ) -> None:
+        """Play one rhythm-predicted beat without feeding it back into rhythm learning."""
+        self._rhythm_direct_triggered_prediction_ids.add(prediction.prediction_id)
+        scheduling_error_ms = (
+            timestamp.seconds - prediction.expected_timestamp_seconds
+        ) * 1000.0
+        logger.info(
+            "Rhythm direct trigger gesture=%s confidence=%.2f expected=%.3f "
+            "actual=%.3f scheduling_error_ms=%.1f frame=%s",
+            prediction.gesture,
+            prediction.confidence,
+            prediction.expected_timestamp_seconds,
+            timestamp.seconds,
+            scheduling_error_ms,
+            frame_index,
+        )
+        if self.recorder is not None:
+            self.recorder.log_rhythm_live_trigger(
+                timestamp=timestamp.seconds,
+                frame_index=frame_index,
+                prediction_id=prediction.prediction_id,
+                predicted_time_seconds=prediction.expected_timestamp_seconds,
+                scheduling_error_ms=scheduling_error_ms,
+                gesture=prediction.gesture,
+                confidence=prediction.confidence,
+                interval_seconds=prediction.interval_seconds,
+                repetition_count=prediction.repetition_count,
+                jitter=prediction.jitter_ratio,
+                source="rhythm_direct",
+            )
+        live_event = GestureEvent(
+            gesture=prediction.gesture,
+            confidence=prediction.confidence,
+            hand=self.config.gestures.active_hand,
+            timestamp=timestamp,
+            label=_predictor_trigger_label(prediction.gesture, "rhythm"),
+        )
+        self._handle_confirmed_gesture(
+            live_event,
+            source="rhythm_direct",
+            frame_index=frame_index,
+            observe_rhythm=False,
+        )
+
+    def _refresh_rhythm_completion_arm(
+        self,
+        prediction: RhythmPrediction,
+        *,
+        current_timestamp_seconds: float,
+        frame_index: int | None,
+    ) -> None:
+        """Use a confident rhythm expectation to arm hybrid completion firing."""
+        if (
+            frame_index is None
+            or not self.config.predictive.predictive_uses_completion_gate
+            or not self.config.predictive.rhythm_arms_completion_gate
+            or prediction.confidence < self.config.predictive.rhythm_confidence_threshold
+        ):
+            return
+        current_arm = self._active_predictive_completion_arm(
+            frame_index=frame_index,
+            timestamp_seconds=current_timestamp_seconds,
+        )
+        if current_arm is not None and current_arm.source == "cnn":
+            logger.debug(
+                "Rhythm completion arm ignored because CNN arm is active gesture=%s frame=%s",
+                current_arm.gesture,
+                frame_index,
+            )
+            return
+        if current_arm is not None and current_arm.gesture is not prediction.gesture:
+            logger.debug(
+                "Rhythm completion arm retained gesture=%s frame=%s despite "
+                "conflicting rhythm gesture=%s",
+                current_arm.gesture,
+                frame_index,
+                prediction.gesture,
+            )
+            return
+        expires_after_frame_index = frame_index + max(
+            1,
+            math.ceil(
+                max(0.0, prediction.expires_after_seconds - current_timestamp_seconds)
+                * float(self.config.camera.fps)
+            ),
+        )
+        refreshed_arm = _PredictiveCompletionArm(
+            gesture=prediction.gesture,
+            timing_probability=prediction.confidence,
+            gesture_confidence=prediction.confidence,
+            class_probabilities={prediction.gesture.value: prediction.confidence},
+            armed_frame_index=(
+                current_arm.armed_frame_index
+                if current_arm is not None
+                else frame_index
+            ),
+            expires_after_frame_index=expires_after_frame_index,
+            source="rhythm",
+            armed_timestamp_seconds=(
+                current_arm.armed_timestamp_seconds
+                if current_arm is not None
+                else current_timestamp_seconds
+            ),
+            expected_timestamp_seconds=prediction.expected_timestamp_seconds,
+            expires_after_timestamp_seconds=prediction.expires_after_seconds,
+        )
+        logger.info(
+            "Rhythm completion arm set gesture=%s confidence=%.2f frame=%s "
+            "expected=%.3f expires_after=%.3f",
+            refreshed_arm.gesture,
+            refreshed_arm.gesture_confidence,
+            frame_index,
+            prediction.expected_timestamp_seconds,
+            prediction.expires_after_seconds,
+        )
+        self._predictive_completion_arm = refreshed_arm
+
+    def _log_rhythm_prediction_outcome(
+        self,
+        outcome: RhythmPredictionOutcome,
+        *,
+        current_timestamp: float,
+        frame_index: int | None,
+        source: str,
+    ) -> None:
+        """Write one structured rhythm-prediction evaluation event."""
+        self._last_rhythm_outcome = outcome
+        self._last_rhythm_outcome_timestamp_seconds = current_timestamp
+        seconds_until_prediction = outcome.predicted_time_seconds - current_timestamp
+        seconds_until_expiry = outcome.expires_after_seconds - current_timestamp
+        status_description = self._rhythm_outcome_description(
+            outcome,
+            current_timestamp=current_timestamp,
+            seconds_until_prediction=seconds_until_prediction,
+            seconds_until_expiry=seconds_until_expiry,
+        )
+        logger.info(
+            "Rhythm prediction gesture=%s outcome=%s confidence=%.2f expected=%.3f "
+            "interval=%.3f expiry=%.3f source=%s description=%s",
+            outcome.gesture,
+            outcome.outcome,
+            outcome.confidence,
+            outcome.predicted_time_seconds,
+            outcome.interval_seconds,
+            outcome.expires_after_seconds,
+            source,
+            status_description,
+        )
+        if self.recorder is None:
+            return
+        self.recorder.log_rhythm_prediction(
+            timestamp=current_timestamp,
+            frame_index=frame_index,
+            prediction_id=outcome.prediction_id,
+            outcome=outcome.outcome,
+            gesture=outcome.gesture,
+            predicted_time_seconds=outcome.predicted_time_seconds,
+            actual_time_seconds=outcome.actual_time_seconds,
+            actual_gesture=outcome.actual_gesture,
+            error_ms=outcome.error_ms,
+            last_event_timestamp=outcome.last_observed_timestamp_seconds,
+            interval_seconds=outcome.interval_seconds,
+            expires_after_seconds=outcome.expires_after_seconds,
+            seconds_until_prediction=seconds_until_prediction,
+            seconds_until_expiry=seconds_until_expiry,
+            match_tolerance_seconds=self.config.predictive.rhythm_match_tolerance_seconds,
+            confidence=outcome.confidence,
+            repetition_count=outcome.repetition_count,
+            jitter=outcome.jitter_ratio,
+            active=outcome.outcome == "pending",
+            shadow_only=self.config.predictive.rhythm_trigger_mode == "shadow",
+            source=source,
+            trigger_mode=self.config.predictive.rhythm_trigger_mode,
+            status_description=status_description,
+        )
+
+    def _rhythm_outcome_description(
+        self,
+        outcome: RhythmPredictionOutcome,
+        *,
+        current_timestamp: float,
+        seconds_until_prediction: float,
+        seconds_until_expiry: float,
+    ) -> str:
+        """Build a human-readable description for rhythm experiment logs."""
+        gesture = outcome.gesture.value
+        if outcome.outcome == "pending":
+            return (
+                f"predicted next {gesture} at {outcome.predicted_time_seconds:.3f}s "
+                f"({_format_delta_ms(seconds_until_prediction)} from now); "
+                f"interval={outcome.interval_seconds:.3f}s, "
+                f"confidence={outcome.confidence:.2f}, jitter={outcome.jitter_ratio:.2f}, "
+                f"repetitions={outcome.repetition_count}, "
+                f"expires at {outcome.expires_after_seconds:.3f}s "
+                f"({_format_delta_ms(seconds_until_expiry)})"
+            )
+        if outcome.outcome == "matched":
+            actual_time = (
+                current_timestamp
+                if outcome.actual_time_seconds is None
+                else outcome.actual_time_seconds
+            )
+            error_text = "--" if outcome.error_ms is None else f"{outcome.error_ms:+.1f} ms"
+            return (
+                f"matched predicted {gesture}: expected "
+                f"{outcome.predicted_time_seconds:.3f}s, actual {actual_time:.3f}s, "
+                f"error={error_text}"
+            )
+        if outcome.outcome == "missed":
+            expiry_text = (
+                "prediction state has expired"
+                if seconds_until_expiry <= 0.0
+                else f"state expires in {_format_delta_ms(seconds_until_expiry)}"
+            )
+            actual_gesture = (
+                outcome.actual_gesture.value
+                if outcome.actual_gesture is not None
+                else "unknown"
+            )
+            actual_text = (
+                "no matching hit arrived"
+                if outcome.actual_time_seconds is None
+                else (
+                    f"actual {actual_gesture} arrived at "
+                    f"{outcome.actual_time_seconds:.3f}s"
+                )
+            )
+            return (
+                f"missed predicted {gesture} at {outcome.predicted_time_seconds:.3f}s; "
+                f"{actual_text}; {expiry_text}"
+            )
+        return (
+            f"expired predicted {gesture} at {outcome.predicted_time_seconds:.3f}s; "
+            f"expiry was {outcome.expires_after_seconds:.3f}s"
+        )
 
     def _handle_predictive_event(
         self,
@@ -804,25 +1419,42 @@ class VisionBeatRuntime:
         self,
         *,
         frame_index: int,
+        timestamp_seconds: float | None = None,
     ) -> _PredictiveCompletionArm | None:
         """Return the current predictive arm after expiring stale state."""
         arm = self._predictive_completion_arm
         if arm is None:
             return None
-        if frame_index <= arm.expires_after_frame_index:
+        frame_active = frame_index <= arm.expires_after_frame_index
+        time_active = (
+            True
+            if timestamp_seconds is None or arm.expires_after_timestamp_seconds is None
+            else timestamp_seconds <= arm.expires_after_timestamp_seconds
+        )
+        if frame_active and time_active:
             return arm
         logger.debug(
-            "Predictive completion arm expired gesture=%s armed_frame=%s current_frame=%s",
+            "Predictive completion arm expired gesture=%s source=%s armed_frame=%s "
+            "current_frame=%s",
             arm.gesture,
+            arm.source,
             arm.armed_frame_index,
             frame_index,
         )
         self._predictive_completion_arm = None
         return None
 
-    def _refresh_predictive_completion_arm(self, *, frame_index: int) -> None:
+    def _refresh_predictive_completion_arm(
+        self,
+        *,
+        frame_index: int,
+        timestamp_seconds: float | None = None,
+    ) -> None:
         """Update the predictive completion gate from the latest live model status."""
-        current_arm = self._active_predictive_completion_arm(frame_index=frame_index)
+        current_arm = self._active_predictive_completion_arm(
+            frame_index=frame_index,
+            timestamp_seconds=timestamp_seconds,
+        )
         if (
             not self.config.predictive.predictive_uses_completion_gate
             or self.predictive_shadow_runner is None
@@ -844,8 +1476,14 @@ class VisionBeatRuntime:
             class_probabilities=dict(status.class_probabilities),
             armed_frame_index=frame_index,
             expires_after_frame_index=frame_index + self._predictive_completion_horizon_frames(),
+            source="cnn",
+            armed_timestamp_seconds=timestamp_seconds,
         )
-        if current_arm is not None and current_arm.gesture != refreshed_arm.gesture:
+        if (
+            current_arm is not None
+            and current_arm.source == "cnn"
+            and current_arm.gesture != refreshed_arm.gesture
+        ):
             logger.debug(
                 "Predictive completion arm retained gesture=%s frame=%s despite "
                 "conflicting status gesture=%s",
@@ -856,6 +1494,7 @@ class VisionBeatRuntime:
             return
         if (
             current_arm is not None
+            and current_arm.source == "cnn"
             and current_arm.gesture == refreshed_arm.gesture
             and current_arm.timing_probability > refreshed_arm.timing_probability
         ):
@@ -866,12 +1505,17 @@ class VisionBeatRuntime:
                 class_probabilities=dict(current_arm.class_probabilities),
                 armed_frame_index=current_arm.armed_frame_index,
                 expires_after_frame_index=refreshed_arm.expires_after_frame_index,
+                source=current_arm.source,
+                armed_timestamp_seconds=current_arm.armed_timestamp_seconds,
+                expected_timestamp_seconds=current_arm.expected_timestamp_seconds,
+                expires_after_timestamp_seconds=current_arm.expires_after_timestamp_seconds,
             )
         elif current_arm is None:
             logger.debug(
-                "Predictive completion arm set gesture=%s timing_probability=%.2f "
+                "Predictive completion arm set gesture=%s source=%s timing_probability=%.2f "
                 "gesture_confidence=%.2f frame=%s expires_after=%s",
                 refreshed_arm.gesture,
+                refreshed_arm.source,
                 refreshed_arm.timing_probability,
                 refreshed_arm.gesture_confidence,
                 frame_index,
@@ -886,7 +1530,10 @@ class VisionBeatRuntime:
         frame_index: int,
     ) -> None:
         """Release an armed predictive gesture on a matching completion event."""
-        arm = self._active_predictive_completion_arm(frame_index=frame_index)
+        arm = self._active_predictive_completion_arm(
+            frame_index=frame_index,
+            timestamp_seconds=event.timestamp.seconds,
+        )
         if arm is None:
             logger.debug(
                 "Predictive completion gate ignored heuristic %s at frame=%s: no arm",
@@ -897,26 +1544,30 @@ class VisionBeatRuntime:
         if event.gesture is not arm.gesture:
             logger.info(
                 "Predictive completion gate ignored mismatched heuristic predicted=%s "
-                "heuristic=%s frame=%s",
+                "heuristic=%s source=%s frame=%s",
                 arm.gesture,
                 event.gesture,
+                arm.source,
                 frame_index,
             )
             return
+        predictor_label = "rhythm" if arm.source == "rhythm" else "CNN"
         live_event = GestureEvent(
             gesture=arm.gesture,
             confidence=event.confidence,
             hand=event.hand,
             timestamp=event.timestamp,
-            label=f"Predictive-arm {arm.gesture.value} completion",
+            label=_predictor_trigger_label(arm.gesture, predictor_label),
         )
         logger.info(
             "Predictive completion trigger gesture=%s completion_confidence=%.2f "
-            "timing_probability=%.2f class_confidence=%.2f frame=%s",
+            "timing_probability=%.2f class_confidence=%.2f source=%s label=%s frame=%s",
             arm.gesture,
             event.confidence,
             arm.timing_probability,
             arm.gesture_confidence,
+            arm.source,
+            live_event.label,
             frame_index,
         )
         if self.recorder is not None:
@@ -928,9 +1579,18 @@ class VisionBeatRuntime:
                 predicted_gesture_confidence=arm.gesture_confidence,
                 hand=live_event.hand,
                 class_probabilities=arm.class_probabilities,
+                source=arm.source,
             )
         self._predictive_completion_arm = None
-        self._handle_confirmed_gesture(live_event, source="predictive_completion")
+        self._handle_confirmed_gesture(
+            live_event,
+            source=(
+                "rhythm_completion"
+                if arm.source == "rhythm"
+                else "predictive_completion"
+            ),
+            frame_index=frame_index,
+        )
 
     def _handle_predictive_live_trigger(
         self,
@@ -945,14 +1605,15 @@ class VisionBeatRuntime:
             confidence=event.timing_probability,
             hand=self.config.gestures.active_hand,
             timestamp=playback_timestamp,
-            label=f"Predictive {event.gesture.value} trigger",
+            label=_predictor_trigger_label(event.gesture, "CNN"),
         )
         logger.info(
             "Predictive live trigger gesture=%s timing_probability=%.2f "
-            "class_confidence=%.2f peak_frame=%s emit_frame=%s",
+            "class_confidence=%.2f label=%s peak_frame=%s emit_frame=%s",
             event.gesture,
             event.timing_probability,
             event.gesture_confidence,
+            live_event.label,
             event.frame_index,
             playback_frame_index,
         )
@@ -966,7 +1627,11 @@ class VisionBeatRuntime:
                 hand=live_event.hand,
                 class_probabilities=event.class_probabilities,
             )
-        self._handle_confirmed_gesture(live_event, source="predictive")
+        self._handle_confirmed_gesture(
+            live_event,
+            source="predictive",
+            frame_index=playback_frame_index,
+        )
 
     def _handle_predictive_shadow_trigger(self, event: ShadowPredictionEvent) -> None:
         """Log and persist one shadow-mode predictive trigger without touching audio."""
@@ -1081,6 +1746,10 @@ class VisionBeatApp:
                 ),
                 "predictive_enabled": self.config.predictive.enabled,
                 "predictive_mode": self.config.predictive.mode,
+                "rhythm_prediction_enabled": (
+                    self.config.predictive.rhythm_prediction_enabled
+                ),
+                "rhythm_trigger_mode": self.config.predictive.rhythm_trigger_mode,
                 "predictive_window_size": (
                     None
                     if predictive_shadow_runner is None

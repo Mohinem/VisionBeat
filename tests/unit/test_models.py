@@ -185,7 +185,14 @@ def test_tracker_output_can_be_mirrored_horizontally() -> None:
 
 
 @pytest.mark.parametrize(
-    ("fps", "capture_fps", "inference_fps", "render_fps", "pipeline_latency_ms", "cooldown_remaining_seconds"),
+    (
+        "fps",
+        "capture_fps",
+        "inference_fps",
+        "render_fps",
+        "pipeline_latency_ms",
+        "cooldown_remaining_seconds",
+    ),
     [
         (None, None, None, None, None, 0.0),
         (60.0, 30.0, 18.0, 30.0, 42.0, 0.25),
@@ -208,6 +215,7 @@ def test_render_state_accepts_valid_runtime_values(
         render_fps=render_fps,
         cooldown_remaining_seconds=cooldown_remaining_seconds,
         predictive_status=" p=0.23/0.30 top=kick 0.71 ",
+        rhythm_status=" kick next @2.500s ",
         pipeline_latency_ms=pipeline_latency_ms,
     )
 
@@ -219,6 +227,7 @@ def test_render_state_accepts_valid_runtime_values(
     assert state.pipeline_latency_ms == pipeline_latency_ms
     assert state.cooldown_remaining_seconds == cooldown_remaining_seconds
     assert state.predictive_status == "p=0.23/0.30 top=kick 0.71"
+    assert state.rhythm_status == "kick next @2.500s"
 
 
 @pytest.mark.parametrize(

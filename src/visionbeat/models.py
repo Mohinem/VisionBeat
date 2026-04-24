@@ -317,6 +317,7 @@ class RenderState:
     cooldown_remaining_seconds: float = 0.0
     detector_status: str | None = None
     predictive_status: str | None = None
+    rhythm_status: str | None = None
     audio_status: str | None = None
     pipeline_latency_ms: float | None = None
 
@@ -350,6 +351,8 @@ class RenderState:
             object.__setattr__(self, "detector_status", self.detector_status.strip() or None)
         if self.predictive_status is not None:
             object.__setattr__(self, "predictive_status", self.predictive_status.strip() or None)
+        if self.rhythm_status is not None:
+            object.__setattr__(self, "rhythm_status", self.rhythm_status.strip() or None)
         if self.audio_status is not None:
             object.__setattr__(self, "audio_status", self.audio_status.strip() or None)
 

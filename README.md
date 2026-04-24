@@ -205,6 +205,32 @@ visionbeat \
   --gesture-checkpoint path/to/gesture.pt
 ```
 
+### Rhythm continuation mode
+
+Repetition-based rhythm prediction can run on top of the existing live trigger
+modes. It learns only from confirmed kick/snare sounds, whether those sounds came
+from heuristics, primary CNN prediction, or hybrid completion. In direct mode, a
+stable pulse can play the next expected kick/snare itself:
+
+```yaml
+predictive:
+  rhythm_prediction_enabled: true
+  rhythm_trigger_mode: direct
+```
+
+For a CNN-backed run, keep `mode: primary` or `mode: hybrid` and the normal
+checkpoint paths. For a heuristic-only run, use `mode: disabled`. Direct rhythm
+triggers do not feed themselves back into rhythm learning, so the system will not
+keep playing indefinitely without new confirmed performer/model events.
+Live trigger labels distinguish the source: rhythm-played beats appear as
+`Kick (rhythm predictor)` / `Snare (rhythm predictor)`, while CNN predictive
+beats appear as `Kick (CNN)` / `Snare (CNN)`. The debug HUD also includes a
+`Rhythm:` line with the current expected beat time, interval, confidence,
+jitter, repetition count, expiry countdown, and latest matched/missed outcome.
+
+See [`docs/rhythm_prediction_evaluation.md`](docs/rhythm_prediction_evaluation.md)
+for the ARJ rhythm-continuation test protocol.
+
 Useful predictive overrides:
 
 - `--predictive-threshold`

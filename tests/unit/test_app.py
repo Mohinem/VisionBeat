@@ -161,6 +161,8 @@ class FakeRecorder:
         self.tracking_failures: list[tuple[float, str]] = []
         self.predictive_shadow_triggers: list[dict[str, object]] = []
         self.predictive_live_triggers: list[dict[str, object]] = []
+        self.rhythm_predictions: list[dict[str, object]] = []
+        self.rhythm_live_triggers: list[dict[str, object]] = []
         self.shutdown_calls = 0
         self.close_calls = 0
         self.app_startups: list[dict[str, object]] = []
@@ -213,6 +215,7 @@ class FakeRecorder:
         predicted_gesture_confidence: float,
         hand: str,
         class_probabilities: dict[str, float],
+        source: str = "cnn",
     ) -> None:
         self.predictive_live_triggers.append(
             {
@@ -223,6 +226,95 @@ class FakeRecorder:
                 "predicted_gesture_confidence": predicted_gesture_confidence,
                 "hand": hand,
                 "class_probabilities": class_probabilities,
+                "source": source,
+            }
+        )
+
+    def log_rhythm_prediction(
+        self,
+        *,
+        timestamp: float,
+        frame_index: int | None,
+        prediction_id: str,
+        outcome: str,
+        gesture: GestureType,
+        predicted_time_seconds: float,
+        actual_time_seconds: float | None,
+        actual_gesture: GestureType | None,
+        error_ms: float | None,
+        last_event_timestamp: float,
+        interval_seconds: float,
+        expires_after_seconds: float,
+        seconds_until_prediction: float,
+        seconds_until_expiry: float,
+        match_tolerance_seconds: float,
+        confidence: float,
+        repetition_count: int,
+        jitter: float,
+        active: bool,
+        shadow_only: bool,
+        source: str,
+        trigger_mode: str,
+        status_description: str,
+    ) -> None:
+        self.rhythm_predictions.append(
+            {
+                "timestamp": timestamp,
+                "frame_index": frame_index,
+                "prediction_id": prediction_id,
+                "outcome": outcome,
+                "gesture": gesture,
+                "predicted_time_seconds": predicted_time_seconds,
+                "actual_time_seconds": actual_time_seconds,
+                "actual_gesture": actual_gesture,
+                "error_ms": error_ms,
+                "last_event_timestamp": last_event_timestamp,
+                "estimated_interval_seconds": interval_seconds,
+                "next_expected_timestamp": predicted_time_seconds,
+                "interval_seconds": interval_seconds,
+                "expires_after_seconds": expires_after_seconds,
+                "seconds_until_prediction": seconds_until_prediction,
+                "seconds_until_expiry": seconds_until_expiry,
+                "match_tolerance_seconds": match_tolerance_seconds,
+                "confidence": confidence,
+                "repetition_count": repetition_count,
+                "jitter": jitter,
+                "active": active,
+                "shadow_only": shadow_only,
+                "source": source,
+                "trigger_mode": trigger_mode,
+                "status_description": status_description,
+            }
+        )
+
+    def log_rhythm_live_trigger(
+        self,
+        *,
+        timestamp: float,
+        frame_index: int,
+        prediction_id: str,
+        predicted_time_seconds: float,
+        scheduling_error_ms: float,
+        gesture: GestureType,
+        confidence: float,
+        interval_seconds: float,
+        repetition_count: int,
+        jitter: float,
+        source: str,
+    ) -> None:
+        self.rhythm_live_triggers.append(
+            {
+                "timestamp": timestamp,
+                "frame_index": frame_index,
+                "prediction_id": prediction_id,
+                "predicted_time_seconds": predicted_time_seconds,
+                "scheduling_error_ms": scheduling_error_ms,
+                "gesture": gesture,
+                "confidence": confidence,
+                "interval_seconds": interval_seconds,
+                "repetition_count": repetition_count,
+                "jitter": jitter,
+                "source": source,
             }
         )
 
@@ -698,6 +790,725 @@ def test_runtime_records_tracking_failures_for_non_tracking_status() -> None:
     assert recorder.tracking_failures == [(3.0, "no_person_detected")]
 
 
+def test_runtime_logs_rhythm_predictions_without_touching_audio() -> None:
+    recorder = FakeRecorder()
+    timestamps = (1.0, 1.5, 2.0)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.9,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in timestamps
+    ]
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "shadow",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[[event] for event in events],
+            candidates_by_frame=[(), (), ()],
+            cooldowns=[0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False]),
+        recorder=recorder,
+    )
+
+    runtime.process_next_frame()
+    runtime.process_next_frame()
+    runtime.process_next_frame()
+
+    assert [trigger.gesture for trigger in runtime.audio.triggers] == [
+        GestureType.KICK,
+        GestureType.KICK,
+        GestureType.KICK,
+    ]
+    assert len(recorder.rhythm_predictions) == 1
+    prediction = recorder.rhythm_predictions[0]
+    assert prediction["gesture"] is GestureType.KICK
+    assert prediction["outcome"] == "pending"
+    assert prediction["timestamp"] == pytest.approx(2.0)
+    assert prediction["frame_index"] == 2
+    assert prediction["predicted_time_seconds"] == pytest.approx(2.5)
+    assert prediction["actual_time_seconds"] is None
+    assert prediction["actual_gesture"] is None
+    assert prediction["error_ms"] is None
+    assert prediction["last_event_timestamp"] == pytest.approx(2.0)
+    assert prediction["estimated_interval_seconds"] == pytest.approx(0.5)
+    assert prediction["next_expected_timestamp"] == pytest.approx(2.5)
+    assert prediction["interval_seconds"] == pytest.approx(0.5)
+    assert prediction["expires_after_seconds"] == pytest.approx(2.875)
+    assert prediction["seconds_until_prediction"] == pytest.approx(0.5)
+    assert prediction["seconds_until_expiry"] == pytest.approx(0.875)
+    assert prediction["match_tolerance_seconds"] == pytest.approx(0.12)
+    assert prediction["confidence"] == pytest.approx(0.9)
+    assert prediction["repetition_count"] == 2
+    assert prediction["jitter"] == pytest.approx(0.0)
+    assert prediction["active"] is True
+    assert prediction["shadow_only"] is True
+    assert prediction["source"] == "heuristic"
+    assert prediction["trigger_mode"] == "shadow"
+    assert "predicted next kick" in prediction["status_description"]
+    assert runtime.overlay.calls[-1][1].rhythm_status is not None
+    assert "kick next @2.500s" in runtime.overlay.calls[-1][1].rhythm_status
+    assert "conf=0.90/0.70" in runtime.overlay.calls[-1][1].rhythm_status
+
+
+def test_runtime_logs_missed_rhythm_prediction_after_skipped_beat() -> None:
+    recorder = FakeRecorder()
+    event_timestamps = (1.0, 1.5, 2.0)
+    frame_timestamps = (1.0, 1.5, 2.0, 2.9)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.9,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in event_timestamps
+    ]
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "shadow",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(frame_timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in frame_timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[[events[0]], [events[1]], [events[2]], []],
+            candidates_by_frame=[(), (), (), ()],
+            cooldowns=[0.0, 0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False, False]),
+        recorder=recorder,
+    )
+
+    for _ in frame_timestamps:
+        runtime.process_next_frame()
+
+    assert len(runtime.audio.triggers) == 3
+    assert len(recorder.rhythm_predictions) == 2
+    active_prediction, missed_prediction = recorder.rhythm_predictions
+    assert active_prediction["active"] is True
+    assert missed_prediction["active"] is False
+    assert missed_prediction["outcome"] == "missed"
+    assert missed_prediction["gesture"] is GestureType.KICK
+    assert missed_prediction["timestamp"] == pytest.approx(2.9)
+    assert missed_prediction["predicted_time_seconds"] == pytest.approx(2.5)
+    assert missed_prediction["actual_time_seconds"] is None
+    assert missed_prediction["error_ms"] is None
+    assert missed_prediction["next_expected_timestamp"] == pytest.approx(2.5)
+    assert missed_prediction["expires_after_seconds"] == pytest.approx(2.875)
+    assert missed_prediction["seconds_until_prediction"] == pytest.approx(-0.4)
+    assert missed_prediction["seconds_until_expiry"] == pytest.approx(-0.025)
+    assert missed_prediction["source"] == "advance"
+    assert missed_prediction["shadow_only"] is True
+    assert "prediction state has expired" in missed_prediction["status_description"]
+    assert runtime.overlay.calls[-1][1].rhythm_status is not None
+    assert "last=missed/expired kick" in runtime.overlay.calls[-1][1].rhythm_status
+
+
+def test_runtime_logs_matched_rhythm_prediction_without_extra_audio() -> None:
+    recorder = FakeRecorder()
+    timestamps = (1.0, 1.5, 2.0, 2.55)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.9,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in timestamps
+    ]
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "shadow",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[[event] for event in events],
+            candidates_by_frame=[(), (), (), ()],
+            cooldowns=[0.0, 0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False, False]),
+        recorder=recorder,
+    )
+
+    for _ in timestamps:
+        runtime.process_next_frame()
+
+    assert len(runtime.audio.triggers) == 4
+    matched = [
+        prediction
+        for prediction in recorder.rhythm_predictions
+        if prediction["outcome"] == "matched"
+    ]
+    assert len(matched) == 1
+    assert matched[0]["predicted_time_seconds"] == pytest.approx(2.5)
+    assert matched[0]["actual_time_seconds"] == pytest.approx(2.55)
+    assert matched[0]["error_ms"] == pytest.approx(50.0)
+    assert matched[0]["active"] is False
+
+
+def test_runtime_rhythm_direct_trigger_plays_expected_beat_without_self_training() -> None:
+    event_timestamps = (1.0, 1.5, 2.0)
+    frame_timestamps = (1.0, 1.5, 2.0, 2.5, 3.0)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.82,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in event_timestamps
+    ]
+    recorder = FakeRecorder()
+    session_recorder = FakeSessionRecorder()
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "direct",
+                    "rhythm_confidence_threshold": 0.7,
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(frame_timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in frame_timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[[events[0]], [events[1]], [events[2]], [], []],
+            candidates_by_frame=[(), (), (), (), ()],
+            cooldowns=[0.0, 0.0, 0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False, False, False]),
+        recorder=recorder,
+        session_recorder=session_recorder,
+    )
+
+    for _ in frame_timestamps:
+        runtime.process_next_frame()
+
+    assert [trigger.gesture for trigger in runtime.audio.triggers] == [
+        GestureType.KICK,
+        GestureType.KICK,
+        GestureType.KICK,
+        GestureType.KICK,
+    ]
+    assert runtime.audio.triggers[-1].intensity == pytest.approx(0.82)
+    assert session_recorder.triggers[-1].label == "Kick (rhythm predictor)"
+    assert len(recorder.rhythm_live_triggers) == 1
+    rhythm_trigger = recorder.rhythm_live_triggers[0]
+    assert rhythm_trigger["gesture"] is GestureType.KICK
+    assert rhythm_trigger["predicted_time_seconds"] == pytest.approx(2.5)
+    assert rhythm_trigger["timestamp"] == pytest.approx(2.5)
+    assert rhythm_trigger["scheduling_error_ms"] == pytest.approx(0.0)
+    assert rhythm_trigger["source"] == "rhythm_direct"
+    assert [trigger.label for trigger in session_recorder.triggers].count(
+        "Kick (rhythm predictor)"
+    ) == 1
+
+
+def test_runtime_rhythm_direct_does_not_duplicate_matching_real_hit() -> None:
+    timestamps = (1.0, 1.5, 2.0)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.82,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in timestamps
+    ]
+    matching_event = GestureEvent(
+        gesture=GestureType.KICK,
+        confidence=0.84,
+        hand="right",
+        timestamp=FrameTimestamp(seconds=2.5),
+        label="Downward strike trigger",
+    )
+    recorder = FakeRecorder()
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "direct",
+                    "rhythm_confidence_threshold": 0.7,
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate((*timestamps, 2.5))
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in (*timestamps, 2.5)]),
+        detector=FakeDetector(
+            events_by_frame=[[events[0]], [events[1]], [events[2]], [matching_event]],
+            candidates_by_frame=[(), (), (), ()],
+            cooldowns=[0.0, 0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False, False]),
+        recorder=recorder,
+    )
+
+    for _ in (*timestamps, 2.5):
+        runtime.process_next_frame()
+
+    assert len(runtime.audio.triggers) == 4
+    assert runtime.audio.triggers[-1].intensity == pytest.approx(0.84)
+    assert recorder.rhythm_live_triggers == []
+    matched = [
+        prediction
+        for prediction in recorder.rhythm_predictions
+        if prediction["outcome"] == "matched"
+    ]
+    assert len(matched) == 1
+    assert matched[0]["actual_time_seconds"] == pytest.approx(2.5)
+
+
+def test_runtime_rhythm_direct_suppresses_late_matching_real_hit_duplicate() -> None:
+    event_timestamps = (1.0, 1.5, 2.0)
+    frame_timestamps = (1.0, 1.5, 2.0, 2.5, 2.55)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.82,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in event_timestamps
+    ]
+    late_matching_event = GestureEvent(
+        gesture=GestureType.KICK,
+        confidence=0.84,
+        hand="right",
+        timestamp=FrameTimestamp(seconds=2.55),
+        label="Downward strike trigger",
+    )
+    recorder = FakeRecorder()
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "direct",
+                    "rhythm_confidence_threshold": 0.7,
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(frame_timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in frame_timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[
+                [events[0]],
+                [events[1]],
+                [events[2]],
+                [],
+                [late_matching_event],
+            ],
+            candidates_by_frame=[(), (), (), (), ()],
+            cooldowns=[0.0, 0.0, 0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False, False, False]),
+        recorder=recorder,
+    )
+
+    for _ in frame_timestamps:
+        runtime.process_next_frame()
+
+    assert len(runtime.audio.triggers) == 4
+    assert len(recorder.rhythm_live_triggers) == 1
+    matched = [
+        prediction
+        for prediction in recorder.rhythm_predictions
+        if prediction["outcome"] == "matched"
+    ]
+    assert len(matched) == 1
+    assert matched[0]["actual_time_seconds"] == pytest.approx(2.55)
+    assert matched[0]["source"] == "heuristic_after_rhythm_direct"
+
+
+def test_runtime_predictive_primary_events_feed_rhythm_direct_trigger() -> None:
+    timestamps = (1.0, 1.5, 2.0, 2.5)
+    predictive_event = ShadowPredictionEvent(
+        frame_index=7,
+        timestamp=FrameTimestamp(seconds=1.0),
+        timing_probability=0.86,
+        threshold=0.6,
+        run_length=2,
+        gesture=GestureType.KICK,
+        gesture_confidence=0.91,
+        class_probabilities={"kick": 0.91, "snare": 0.09},
+        heuristic_triggered_on_peak_frame=False,
+        heuristic_gesture_types_on_peak_frame=(),
+    )
+    recorder = FakeRecorder()
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "primary",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "direct",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[[], [], [], []],
+            candidates_by_frame=[(), (), (), ()],
+            cooldowns=[0.0, 0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False, False]),
+        recorder=recorder,
+        session_recorder=FakeSessionRecorder(),
+        predictive_shadow_runner=FakePredictiveShadowRunner((predictive_event,)),
+    )
+
+    runtime.process_next_frame()
+    runtime.process_next_frame()
+    runtime.process_next_frame()
+    runtime.predictive_shadow_runner.events = ()
+    runtime.process_next_frame()
+
+    assert [trigger.gesture for trigger in runtime.audio.triggers] == [
+        GestureType.KICK,
+        GestureType.KICK,
+        GestureType.KICK,
+        GestureType.KICK,
+    ]
+    assert len(recorder.predictive_live_triggers) == 3
+    assert len(recorder.rhythm_live_triggers) == 1
+    assert recorder.rhythm_live_triggers[0]["predicted_time_seconds"] == pytest.approx(2.5)
+    assert runtime.session_recorder.triggers[-1].label == "Kick (rhythm predictor)"
+
+
+def test_runtime_predictive_hybrid_silent_completions_do_not_train_rhythm() -> None:
+    timestamps = (1.0, 1.5, 2.0)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.82,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in timestamps
+    ]
+    recorder = FakeRecorder()
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "hybrid",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "arm_only",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[[event] for event in events],
+            candidates_by_frame=[(), (), ()],
+            cooldowns=[0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False]),
+        recorder=recorder,
+        predictive_shadow_runner=FakePredictiveShadowRunner(
+            (),
+            status_summary="p=0.10/0.60 top=kick 0.51",
+            latest_status=PredictiveStatus(
+                available_window_frames=24,
+                required_window_size=24,
+                threshold=0.6,
+                timing_probability=0.10,
+                predicted_gesture=GestureType.KICK,
+                predicted_gesture_confidence=0.51,
+                class_probabilities={"kick": 0.51, "snare": 0.49},
+            ),
+        ),
+    )
+
+    for _ in timestamps:
+        runtime.process_next_frame()
+
+    assert runtime.audio.triggers == []
+    assert recorder.rhythm_predictions == []
+    assert runtime.overlay.calls[-1][1].predictive_status == (
+        "p=0.10/0.60 top=kick 0.51 arm=--"
+    )
+
+
+def test_runtime_predictive_hybrid_rhythm_arm_learns_from_confirmed_audio() -> None:
+    timestamps = (1.0, 1.5, 2.0)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.82,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in timestamps
+    ]
+    recorder = FakeRecorder()
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "hybrid",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "arm_only",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[[event] for event in events],
+            candidates_by_frame=[(), (), ()],
+            cooldowns=[0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False]),
+        recorder=recorder,
+        predictive_shadow_runner=FakePredictiveShadowRunner(
+            (),
+            status_summary="p=0.90/0.60 top=kick 0.93",
+            latest_status=PredictiveStatus(
+                available_window_frames=24,
+                required_window_size=24,
+                threshold=0.6,
+                timing_probability=0.90,
+                predicted_gesture=GestureType.KICK,
+                predicted_gesture_confidence=0.93,
+                class_probabilities={"kick": 0.93, "snare": 0.07},
+            ),
+        ),
+    )
+
+    for _ in timestamps:
+        runtime.process_next_frame()
+
+    assert len(runtime.audio.triggers) == 3
+    assert len(recorder.predictive_live_triggers) == 3
+    pending_predictions = [
+        event for event in recorder.rhythm_predictions if event["outcome"] == "pending"
+    ]
+    assert len(pending_predictions) == 1
+    assert runtime.overlay.calls[-1][1].predictive_status == (
+        "p=0.90/0.60 top=kick 0.93 arm=rhythm:kick 0.82 ttl=28"
+    )
+
+
+def test_runtime_predictive_hybrid_rhythm_arm_expires_safely() -> None:
+    event_timestamps = (1.0, 1.5, 2.0)
+    frame_timestamps = (1.0, 1.5, 2.0, 2.9)
+    events = [
+        GestureEvent(
+            gesture=GestureType.KICK,
+            confidence=0.82,
+            hand="right",
+            timestamp=FrameTimestamp(seconds=timestamp),
+            label="Downward strike trigger",
+        )
+        for timestamp in event_timestamps
+    ]
+    runtime = VisionBeatRuntime(
+        config=AppConfig(
+            predictive=PredictiveConfig.from_mapping(
+                {
+                    "mode": "hybrid",
+                    "timing_checkpoint_path": "models/timing.pt",
+                    "gesture_checkpoint_path": "models/gesture.pt",
+                    "rhythm_prediction_enabled": True,
+                    "rhythm_trigger_mode": "arm_only",
+                }
+            )
+        ),
+        camera=FakeCamera(
+            [
+                CameraFrame(
+                    image=FakeFrame(f"frame-{index}"),
+                    captured_at=timestamp,
+                    frame_index=index,
+                )
+                for index, timestamp in enumerate(frame_timestamps)
+            ]
+        ),
+        tracker=FakeTracker([make_pose(timestamp) for timestamp in frame_timestamps]),
+        detector=FakeDetector(
+            events_by_frame=[[events[0]], [events[1]], [events[2]], []],
+            candidates_by_frame=[(), (), (), ()],
+            cooldowns=[0.0, 0.0, 0.0, 0.0],
+        ),
+        audio=FakeAudio(),
+        overlay=FakeOverlay(),
+        preview=FakePreview([False, False, False, False]),
+        predictive_shadow_runner=FakePredictiveShadowRunner(
+            (),
+            status_summary="p=0.90/0.60 top=kick 0.93",
+            latest_status=PredictiveStatus(
+                available_window_frames=24,
+                required_window_size=24,
+                threshold=0.6,
+                timing_probability=0.90,
+                predicted_gesture=GestureType.KICK,
+                predicted_gesture_confidence=0.93,
+                class_probabilities={"kick": 0.93, "snare": 0.07},
+            ),
+        ),
+    )
+
+    runtime.process_next_frame()
+    runtime.process_next_frame()
+    runtime.process_next_frame()
+    runtime.predictive_shadow_runner.latest_status = PredictiveStatus(
+        available_window_frames=24,
+        required_window_size=24,
+        threshold=0.6,
+        timing_probability=0.10,
+        predicted_gesture=GestureType.KICK,
+        predicted_gesture_confidence=0.51,
+        class_probabilities={"kick": 0.51, "snare": 0.49},
+    )
+    runtime.predictive_shadow_runner._status_summary = "p=0.10/0.60 top=kick 0.51"
+    runtime.process_next_frame()
+
+    assert len(runtime.audio.triggers) == 3
+    assert runtime.overlay.calls[-1][1].predictive_status == (
+        "p=0.10/0.60 top=kick 0.51 arm=--"
+    )
+
+
 def test_runtime_async_pipeline_decouples_render_loop_from_inference() -> None:
     config = replace(
         AppConfig(),
@@ -897,7 +1708,7 @@ def test_runtime_uses_predictive_primary_mode_to_drive_audio() -> None:
     assert session_recorder.predictive_shadow_triggers == []
     assert session_recorder.triggers[0].gesture is GestureType.KICK
     assert session_recorder.triggers[0].timestamp.seconds == pytest.approx(1.25)
-    assert session_recorder.triggers[0].label == "Predictive kick trigger"
+    assert session_recorder.triggers[0].label == "Kick (CNN)"
     assert runtime.overlay.calls[0][1].confirmed_gesture is not None
     assert runtime.overlay.calls[0][1].confirmed_gesture.timestamp.seconds == pytest.approx(1.25)
 
@@ -1006,7 +1817,7 @@ def test_runtime_predictive_hybrid_mode_fires_on_matching_completion() -> None:
     assert recorder.predictive_live_triggers[0]["timing_probability"] == pytest.approx(0.84)
     assert session_recorder.predictive_shadow_triggers == []
     assert session_recorder.triggers[0].gesture is GestureType.KICK
-    assert session_recorder.triggers[0].label == "Predictive-arm kick completion"
+    assert session_recorder.triggers[0].label == "Kick (CNN)"
     assert runtime.overlay.calls[0][1].predictive_status == "p=0.84/0.60 top=kick 0.91 arm=--"
 
 

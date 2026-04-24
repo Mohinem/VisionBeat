@@ -75,12 +75,24 @@ def test_load_config_supports_nested_yaml_sections() -> None:
     )
     assert (
         config.predictive.gesture_checkpoint_path
-        == "outputs/gesture_classifier_future8_r1r2_train_r3_val/visionbeat_gesture_classifier_run_001/checkpoints/best_model.pt"
+        == "outputs/gesture_classifier_future8_r1r2_train_r3_val/"
+        "visionbeat_gesture_classifier_run_001/checkpoints/best_model.pt"
     )
     assert config.predictive.threshold == pytest.approx(0.6)
     assert config.predictive.trigger_cooldown_frames == 6
     assert config.predictive.trigger_max_gap_frames == 1
     assert config.predictive.device == "auto"
+    assert config.predictive.rhythm_prediction_enabled is False
+    assert config.predictive.rhythm_min_hits == 3
+    assert config.predictive.rhythm_jitter_tolerance == pytest.approx(0.18)
+    assert config.predictive.rhythm_min_interval_seconds == pytest.approx(0.25)
+    assert config.predictive.rhythm_max_interval_seconds == pytest.approx(2.0)
+    assert config.predictive.rhythm_max_horizon_seconds == pytest.approx(2.0)
+    assert config.predictive.rhythm_expiry_ratio == pytest.approx(1.75)
+    assert config.predictive.rhythm_confidence_threshold == pytest.approx(0.70)
+    assert config.predictive.rhythm_match_tolerance_seconds == pytest.approx(0.12)
+    assert config.predictive.rhythm_trigger_mode == "shadow"
+    assert config.predictive.rhythm_triggers_audio is False
 
 
 def test_load_config_supports_toml_with_nested_sections(tmp_path: Path) -> None:
@@ -129,6 +141,16 @@ threshold = 0.65
 trigger_cooldown_frames = 8
 trigger_max_gap_frames = 2
 device = "cpu"
+rhythm_prediction_enabled = true
+rhythm_min_hits = 4
+rhythm_jitter_tolerance = 0.12
+rhythm_min_interval_seconds = 0.3
+rhythm_max_interval_seconds = 1.6
+rhythm_max_horizon_seconds = 1.2
+rhythm_expiry_ratio = 1.5
+rhythm_confidence_threshold = 0.8
+rhythm_match_tolerance_seconds = 0.09
+rhythm_trigger_mode = "arm_only"
 """.strip(),
         encoding="utf-8",
     )
@@ -158,6 +180,18 @@ device = "cpu"
     assert config.predictive.trigger_cooldown_frames == 8
     assert config.predictive.trigger_max_gap_frames == 2
     assert config.predictive.device == "cpu"
+    assert config.predictive.rhythm_prediction_enabled is True
+    assert config.predictive.rhythm_min_hits == 4
+    assert config.predictive.rhythm_jitter_tolerance == pytest.approx(0.12)
+    assert config.predictive.rhythm_min_interval_seconds == pytest.approx(0.3)
+    assert config.predictive.rhythm_max_interval_seconds == pytest.approx(1.6)
+    assert config.predictive.rhythm_max_horizon_seconds == pytest.approx(1.2)
+    assert config.predictive.rhythm_expiry_ratio == pytest.approx(1.5)
+    assert config.predictive.rhythm_confidence_threshold == pytest.approx(0.8)
+    assert config.predictive.rhythm_match_tolerance_seconds == pytest.approx(0.09)
+    assert config.predictive.rhythm_trigger_mode == "arm_only"
+    assert config.predictive.rhythm_arms_completion_gate is True
+    assert config.predictive.rhythm_triggers_audio is False
 
 
 @pytest.mark.parametrize(
@@ -283,6 +317,39 @@ def test_predictive_config_accepts_hybrid_mode() -> None:
     assert config.predictive_uses_completion_gate is True
 
 
+def test_predictive_config_accepts_rhythm_schema_without_cnn_checkpoints() -> None:
+    config = PredictiveConfig.from_mapping(
+        {
+            "rhythm_prediction_enabled": True,
+            "rhythm_min_hits": 4,
+            "rhythm_jitter_tolerance": 0.12,
+            "rhythm_min_interval_seconds": 0.3,
+            "rhythm_max_interval_seconds": 1.6,
+            "rhythm_max_horizon_seconds": 1.2,
+            "rhythm_expiry_ratio": 1.5,
+            "rhythm_confidence_threshold": 0.8,
+            "rhythm_match_tolerance_seconds": 0.09,
+            "rhythm_trigger_mode": "direct",
+        }
+    )
+
+    assert config.enabled is False
+    assert config.mode == "disabled"
+    assert config.rhythm_prediction_enabled is True
+    assert config.rhythm_min_hits == 4
+    assert config.rhythm_jitter_tolerance == pytest.approx(0.12)
+    assert config.rhythm_min_interval_seconds == pytest.approx(0.3)
+    assert config.rhythm_max_interval_seconds == pytest.approx(1.6)
+    assert config.rhythm_max_horizon_seconds == pytest.approx(1.2)
+    assert config.rhythm_expiry_ratio == pytest.approx(1.5)
+    assert config.rhythm_confidence_threshold == pytest.approx(0.8)
+    assert config.rhythm_match_tolerance_seconds == pytest.approx(0.09)
+    assert config.rhythm_trigger_mode == "direct"
+    assert config.rhythm_arms_completion_gate is False
+    assert config.rhythm_triggers_audio is True
+    assert config.to_dict()["rhythm_trigger_mode"] == "direct"
+
+
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
@@ -291,7 +358,8 @@ def test_predictive_config_accepts_hybrid_mode() -> None:
         ({"window_name": "   "}, "camera.window_name: must not be empty"),
         (
             {"backend": "wizard"},
-            "camera.backend: must be one of 'auto', 'v4l2', 'dshow', 'msmf', 'avfoundation', 'gstreamer', or 'ffmpeg'.",
+            "camera.backend: must be one of 'auto', 'v4l2', 'dshow', 'msmf', "
+            "'avfoundation', 'gstreamer', or 'ffmpeg'.",
         ),
         ({"fourcc": "abc"}, "camera.fourcc: must be exactly four characters when set."),
     ],
@@ -345,6 +413,32 @@ def test_tracker_config_validation_errors(payload: dict[str, object], message: s
         (
             {"enabled": False, "mode": "shadow"},
             "predictive.enabled: conflicts with predictive.mode.",
+        ),
+        (
+            {"rhythm_trigger_mode": "trigger"},
+            "predictive.rhythm_trigger_mode: must be one of 'shadow', "
+            "'arm_only', or 'direct'.",
+        ),
+        (
+            {"rhythm_min_hits": 2},
+            "predictive.rhythm_min_hits: must be greater than or equal to 3.",
+        ),
+        (
+            {"rhythm_min_interval_seconds": 0.6, "rhythm_max_interval_seconds": 0.6},
+            "predictive.rhythm_max_interval_seconds: must be greater than "
+            "predictive.rhythm_min_interval_seconds.",
+        ),
+        (
+            {"rhythm_expiry_ratio": 1.0},
+            "predictive.rhythm_expiry_ratio: must be greater than 1.0.",
+        ),
+        (
+            {"rhythm_confidence_threshold": 1.1},
+            "predictive.rhythm_confidence_threshold: must be less than or equal to 1.0.",
+        ),
+        (
+            {"rhythm_match_tolerance_seconds": -0.01},
+            "predictive.rhythm_match_tolerance_seconds: must be greater than or equal to 0.0.",
         ),
     ],
 )

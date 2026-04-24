@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from visionbeat.config import GestureConfig, GestureCooldownsConfig, LoggingConfig
@@ -147,3 +148,76 @@ def test_observability_recorder_builds_event_logger_from_config(tmp_path: Path) 
     assert persisted["event_kind"] == "tracking_failure"
     assert persisted["accepted"] is False
     assert persisted["reason"] == "no_person_detected"
+
+
+def test_observability_recorder_emits_structured_rhythm_prediction(caplog) -> None:
+    recorder = ObservabilityRecorder()
+
+    with caplog.at_level(logging.INFO, logger="visionbeat.observability"):
+        recorder.log_rhythm_prediction(
+            timestamp=2.0,
+            frame_index=7,
+            prediction_id="kick:1.500000->2.000000",
+            outcome="pending",
+            gesture=GestureType.KICK,
+            predicted_time_seconds=2.0,
+            actual_time_seconds=None,
+            actual_gesture=None,
+            error_ms=None,
+            last_event_timestamp=1.5,
+            interval_seconds=0.5,
+            expires_after_seconds=2.375,
+            seconds_until_prediction=0.0,
+            seconds_until_expiry=0.375,
+            match_tolerance_seconds=0.12,
+            confidence=0.86,
+            repetition_count=3,
+            jitter=0.02,
+            active=True,
+            shadow_only=True,
+            source="heuristic",
+            trigger_mode="shadow",
+            status_description="predicted next kick at 2.000s",
+        )
+
+    structured = caplog.records[0].structured
+    assert structured["event"] == "rhythm_prediction"
+    assert structured["gesture"] == "kick"
+    assert structured["outcome"] == "pending"
+    assert structured["predicted_time_seconds"] == 2.0
+    assert structured["actual_time_seconds"] is None
+    assert structured["active"] is True
+    assert structured["shadow_only"] is True
+    assert structured["interval_seconds"] == 0.5
+    assert structured["expires_after_seconds"] == 2.375
+    assert structured["seconds_until_prediction"] == 0.0
+    assert structured["seconds_until_expiry"] == 0.375
+    assert structured["match_tolerance_seconds"] == 0.12
+    assert structured["status_description"] == "predicted next kick at 2.000s"
+
+
+def test_observability_recorder_emits_structured_rhythm_live_trigger(caplog) -> None:
+    recorder = ObservabilityRecorder()
+
+    with caplog.at_level(logging.INFO, logger="visionbeat.observability"):
+        recorder.log_rhythm_live_trigger(
+            timestamp=2.5,
+            frame_index=9,
+            prediction_id="kick:2.000000->2.500000",
+            predicted_time_seconds=2.5,
+            scheduling_error_ms=0.0,
+            gesture=GestureType.KICK,
+            confidence=0.86,
+            interval_seconds=0.5,
+            repetition_count=2,
+            jitter=0.02,
+            source="rhythm_direct",
+        )
+
+    structured = caplog.records[0].structured
+    assert structured["event"] == "rhythm_live_trigger"
+    assert structured["gesture"] == "kick"
+    assert structured["prediction_id"] == "kick:2.000000->2.500000"
+    assert structured["predicted_time_seconds"] == 2.5
+    assert structured["scheduling_error_ms"] == 0.0
+    assert structured["source"] == "rhythm_direct"
